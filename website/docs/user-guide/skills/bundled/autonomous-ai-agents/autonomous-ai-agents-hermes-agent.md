@@ -51,7 +51,7 @@ People use NOTPUNKS for software development, research, system administration, d
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+curl -fsSL https://agent.notpunks.com/install | bash
 
 # Interactive chat (default)
 hermes
