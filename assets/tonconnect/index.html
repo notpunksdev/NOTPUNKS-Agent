@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOTPUNKS Agent — TON Wallet Connect</title>
+    <style>
+        :root {
+            --bg: #0f1010;
+            --fg: #ffffff;
+            --muted: rgba(255,255,255,.64);
+            --soft: rgba(255,255,255,.08);
+            --line: rgba(255,255,255,.12);
+            --blue: #3f94fa;
+            --magenta: #ff00e6;
+            --green: #00c853;
+        }
+        * { box-sizing: border-box; }
+        html { min-height: 100%; -webkit-font-smoothing: antialiased; }
+        body {
+            min-height: 100vh;
+            margin: 0;
+            color: var(--fg);
+            font-family: "Geist", Inter, system-ui, -apple-system, sans-serif;
+            background-color: var(--bg);
+            background-image:
+                radial-gradient(circle at 20% 0%, rgba(63,148,250,.10) 0%, transparent 34%),
+                radial-gradient(circle at 82% 18%, rgba(255,0,230,.08) 0%, transparent 36%);
+            background-attachment: fixed;
+        }
+        .page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .card {
+            width: min(440px, 100%);
+            border: 1px solid var(--line);
+            background: rgba(16,17,17,.78);
+            backdrop-filter: blur(18px);
+            box-shadow: 0 24px 80px rgba(0,0,0,.36);
+            padding: 28px;
+        }
+        .label {
+            margin: 0 0 10px;
+            text-align: center;
+            color: var(--muted);
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 12px;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+        h1 {
+            margin: 0;
+            text-align: center;
+            font-size: 28px;
+            line-height: 1.08;
+            letter-spacing: 0;
+        }
+        .sub {
+            margin: 14px auto 26px;
+            max-width: 320px;
+            text-align: center;
+            color: var(--muted);
+            line-height: 1.5;
+            font-size: 15px;
+        }
+        #ton-connect { min-height: 48px; display: flex; align-items: center; justify-content: center; }
+        #ton-connect button,
+        #ton-connect [role="button"] {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 46px !important;
+            width: 100% !important;
+            border-radius: 999px !important;
+            border: 1px solid rgba(255,255,255,.28) !important;
+            background: rgba(255,255,255,.10) !important;
+            color: var(--fg) !important;
+            font-family: "Geist", Inter, system-ui, sans-serif !important;
+            font-weight: 700 !important;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,.08) !important;
+            transition: transform .15s linear, background .15s linear, border-color .15s linear !important;
+        }
+        #ton-connect button:hover,
+        #ton-connect [role="button"]:hover {
+            background: rgba(255,255,255,.16) !important;
+            border-color: rgba(255,255,255,.42) !important;
+        }
+        #ton-connect button *,
+        #ton-connect [role="button"] * {
+            color: var(--fg) !important;
+            text-align: center !important;
+        }
+        #ton-connect img,
+        #ton-connect svg { filter: none !important; }
+        #ton-connect button:hover,
+        #ton-connect [role="button"]:hover { transform: translateY(-1px); }
+        .status {
+            display: block;
+            margin-top: 16px;
+            padding: 12px 14px;
+            border: 1px solid var(--line);
+            background: var(--soft);
+            color: var(--muted);
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 12px;
+            line-height: 1.45;
+            text-align: center;
+            word-break: break-word;
+        }
+        .status.success {
+            border-color: rgba(0,200,83,.42);
+            background: rgba(0,200,83,.08);
+            color: var(--green);
+        }
+        .status.error {
+            border-color: rgba(255,0,230,.45);
+            background: rgba(255,0,230,.08);
+            color: #ff6bf1;
+        }
+        .loader {
+            display: none;
+            margin-top: 16px;
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255,255,255,.15);
+            border-top-color: var(--blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .footnote {
+            margin-top: 18px;
+            color: var(--muted);
+            text-align: center;
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-size: 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 520px) {
+            .page { padding: 16px; }
+            .card { padding: 24px 18px; }
+            h1 { font-size: 25px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <main class="card">
+            <p class="label">NOTPUNKS AGENT</p>
+            <h1>Connect wallet</h1>
+            <p class="sub">Link your TON wallet to verify NFT access and unlock agent modes.</p>
+            <div id="ton-connect"></div>
+            <div class="loader" id="loader"></div>
+            <div id="status" class="status">Waiting for wallet...</div>
+            <div class="footnote">TON Connect · secure callback to your terminal</div>
+        </main>
+    </div>
+
+    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+    <script>
+        function getQueryParam(name) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(name);
+        }
+
+        const callbackUrl = getQueryParam('callback_url');
+        const sessionId = getQueryParam('session_id');
+        const payload = getQueryParam('payload');
+        const manifestUrl = getQueryParam('manifest_url') || 'https://app.notpunks.com/tonconnect-manifest.json';
+
+        const statusDiv = document.getElementById('status');
+        const loader = document.getElementById('loader');
+
+        if (!callbackUrl || !sessionId) {
+            statusDiv.style.display = 'block';
+            statusDiv.classList.add('error');
+            statusDiv.textContent = 'Missing callback_url or session_id parameters. Please use the link generated by the agent.';
+        } else {
+            const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+                manifestUrl: manifestUrl,
+                buttonRootId: 'ton-connect'
+            });
+
+            if (payload) {
+                tonConnectUI.setConnectRequestParameters({
+                    state: 'ready',
+                    value: { tonProof: payload }
+                });
+            }
+
+            let sent = false;
+
+            async function sendWallet(wallet) {
+                if (!wallet) return;
+                if (sent) return;
+                sent = true;
+
+                statusDiv.style.display = 'block';
+                loader.style.display = 'block';
+                statusDiv.classList.remove('error');
+                statusDiv.textContent = 'Wallet connected! Sending data to agent...';
+
+                const data = {
+                    session_id: sessionId,
+                    address: wallet.account.address,
+                    chain: wallet.account.chain,
+                    public_key: wallet.account.publicKey || '',
+                    device_info: wallet.device || {},
+                    proof: wallet.connectItems?.tonProof?.proof || null
+                };
+
+                try {
+                    const resp = await fetch(callbackUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await resp.json();
+                    loader.style.display = 'none';
+                    if (resp.ok) {
+                        statusDiv.className = 'status success';
+                        statusDiv.textContent = '✓ Wallet linked. You can close this tab.';
+                    } else {
+                        statusDiv.classList.add('error');
+                        statusDiv.textContent = 'Error: ' + (result.message || 'Unknown error');
+                    }
+                } catch (e) {
+                    sent = false;
+                    loader.style.display = 'none';
+                    statusDiv.classList.add('error');
+                    statusDiv.textContent = 'Network error: ' + e.message;
+                }
+            }
+
+            tonConnectUI.onStatusChange(
+                wallet => { sendWallet(wallet); },
+                err => {
+                    loader.style.display = 'none';
+                    statusDiv.style.display = 'block';
+                    statusDiv.classList.add('error');
+                    statusDiv.textContent = 'Wallet error: ' + (err?.message || err);
+                }
+            );
+
+            tonConnectUI.connectionRestored.then(() => {
+                sendWallet(tonConnectUI.wallet);
+            });
+        }
+    </script>
+</body>
+</html>

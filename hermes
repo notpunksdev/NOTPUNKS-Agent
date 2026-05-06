@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""NOTPUNKS Agent CLI launcher (legacy alias). Prefer `./notpunks`."""
+
+if __name__ == "__main__":
+    from hermes_cli.main import main
+    main()

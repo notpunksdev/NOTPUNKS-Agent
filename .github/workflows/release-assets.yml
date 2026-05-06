@@ -1,0 +1,63 @@
+name: Release Assets
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to package, for example v0.11.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-assets-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  build-release-assets:
+    if: github.repository == 'notpunksdev/NOTPUNKS-Agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve tag
+        id: meta
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            echo "Release tag is empty" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6
+        with:
+          python-version: "3.11"
+
+      - name: Build archives
+        run: python scripts/package_release.py --tag "${{ steps.meta.outputs.tag }}"
+
+      - name: Show checksums
+        run: cat dist/release-assets/checksums.txt
+
+      - name: Upload artifacts to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.meta.outputs.tag }}" dist/release-assets/* --clobber
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: notpunks-agent-release-assets-${{ steps.meta.outputs.tag }}
+          path: dist/release-assets/*

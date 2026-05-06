@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "notpunks",
+  "display_name": "NOTPUNKS Agent",
+  "description": "NOTPUNKS Agent with local-first AI workflows, wallet-gated skills, persistent memory, and multi-platform support",
+  "icon": "icon.svg",
+  "distribution": {
+    "type": "command",
+    "command": "notpunks",
+    "args": ["acp"]
+  }
+}

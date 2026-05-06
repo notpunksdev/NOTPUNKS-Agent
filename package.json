@@ -1,0 +1,28 @@
+{
+  "name": "notpunks-agent",
+  "version": "1.0.0",
+  "description": "Local-first AI agent with wallet-gated skills, Skill NFTs, memory, tools, TUI, and messaging gateway.",
+  "private": true,
+  "scripts": {
+    "postinstall": "echo '✅ Browser tools ready. Run: python run_agent.py --help'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/notpunksdev/NOTPUNKS-Agent.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/notpunksdev/NOTPUNKS-Agent/issues"
+  },
+  "homepage": "https://agent.notpunks.com/",
+  "dependencies": {
+    "@askjo/camofox-browser": "^1.5.2",
+    "agent-browser": "^0.26.0"
+  },
+  "overrides": {
+    "lodash": "4.18.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
