@@ -3,7 +3,10 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from tools.skills_sync import (
+    DEFAULT_BUNDLED_SKILLS,
     _get_bundled_dir,
     _read_manifest,
     _read_skill_name,
@@ -16,6 +19,12 @@ from tools.skills_sync import (
     MANIFEST_FILE,
     SKILLS_DIR,
 )
+
+
+@pytest.fixture(autouse=True)
+def _allow_all_bundled_skills(monkeypatch):
+    """Keep legacy sync tests focused on manifest behavior unless they opt in."""
+    monkeypatch.setenv("NOTPUNKS_BUNDLED_SKILLS", "all")
 
 
 class TestReadWriteManifest:
@@ -132,6 +141,33 @@ class TestDiscoverBundledSkills:
     def test_nonexistent_dir_returns_empty(self, tmp_path):
         skills = _discover_bundled_skills(tmp_path / "nonexistent")
         assert skills == []
+
+    def test_default_allowlist_keeps_only_curated_income_skills(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NOTPUNKS_BUNDLED_SKILLS", raising=False)
+        (tmp_path / "productivity" / "notion").mkdir(parents=True)
+        (tmp_path / "productivity" / "notion" / "SKILL.md").write_text(
+            "---\nname: notion\n---\n# Notion\n"
+        )
+        (tmp_path / "games" / "minecraft").mkdir(parents=True)
+        (tmp_path / "games" / "minecraft" / "SKILL.md").write_text(
+            "---\nname: minecraft\n---\n# Minecraft\n"
+        )
+
+        skills = _discover_bundled_skills(tmp_path)
+        skill_names = {name for name, _ in skills}
+
+        assert "notion" in skill_names
+        assert "minecraft" not in skill_names
+        assert "notion" in DEFAULT_BUNDLED_SKILLS
+
+    def test_allowlist_env_can_disable_all_bundled_skills(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NOTPUNKS_BUNDLED_SKILLS", "none")
+        (tmp_path / "productivity" / "notion").mkdir(parents=True)
+        (tmp_path / "productivity" / "notion" / "SKILL.md").write_text(
+            "---\nname: notion\n---\n# Notion\n"
+        )
+
+        assert _discover_bundled_skills(tmp_path) == []
 
 
 class TestReadSkillName:

@@ -96,7 +96,7 @@ TIPS = [
     "notpunks backup creates a zip backup of your entire Hermes home directory.",
     "notpunks profile create coder creates an isolated profile that becomes its own command.",
     "notpunks profile create work --clone copies your current config and keys to a new profile.",
-    "notpunks update syncs new bundled skills to ALL profiles automatically.",
+    "notpunks update keeps marketplace and user-created skills intact across profiles.",
     "notpunks gateway install sets up Hermes as a system service (systemd/launchd).",
     "notpunks memory setup lets you configure an external memory provider (Honcho, Mem0, etc.).",
     "notpunks webhook subscribe creates event-driven webhook routes with HMAC validation.",
@@ -166,7 +166,7 @@ TIPS = [
     "Corrections you give the agent (\"no, do it this way\") are often auto-saved to memory.",
 
     # --- Skills ---
-    "Over 80 bundled skills covering github, creative, mlops, productivity, research, and more.",
+    "Install skills from Skilzzz marketplace or create local skills with /skills create.",
     "Every installed skill automatically becomes a slash command — type / to see them all.",
     "notpunks skills install official/security/1password installs optional skills from the repo.",
     "Skills can restrict to specific OS platforms — some only load on macOS or Linux.",
@@ -343,5 +343,4 @@ def get_random_tip(exclude_recent: int = 0) -> str:
             deduplication across sessions.
     """
     return random.choice(TIPS)
-
 

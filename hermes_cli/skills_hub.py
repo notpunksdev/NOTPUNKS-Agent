@@ -1005,15 +1005,23 @@ def do_list(source_filter: str = "all",
     start.  No explicit profile flag needed here.
     """
     from tools.skills_hub import HubLockFile, ensure_hub_dirs
-    from tools.skills_sync import _read_manifest
+    from tools.skills_sync import _bundled_skill_allowlist, _read_manifest, sync_skills
     from tools.skills_tool import _find_all_skills
     from agent.skill_utils import get_disabled_skill_names
 
     c = console or _console
     ensure_hub_dirs()
+    try:
+        sync_skills(quiet=True)
+    except Exception as e:
+        logger.debug("Failed to refresh bundled skills before listing: %s", e, exc_info=True)
     lock = HubLockFile()
     hub_installed = {e["name"]: e for e in lock.list_installed()}
-    builtin_names = set(_read_manifest())
+    allowlist = _bundled_skill_allowlist()
+    manifest_names = set(_read_manifest())
+    builtin_names = set(manifest_names)
+    if "*" not in allowlist:
+        builtin_names &= allowlist
 
     # Pull ALL skills (including disabled ones) so we can annotate status.
     all_skills = _find_all_skills(skip_disabled=True)
@@ -1040,6 +1048,8 @@ def do_list(source_filter: str = "all",
         name = skill["name"]
         category = skill.get("category", "")
         hub_entry = hub_installed.get(name)
+        if not hub_entry and name in manifest_names and name not in builtin_names:
+            continue
 
         if hub_entry:
             source_type = "hub"

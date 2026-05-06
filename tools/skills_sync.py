@@ -36,6 +36,79 @@ logger = logging.getLogger(__name__)
 HERMES_HOME = get_hermes_home()
 SKILLS_DIR = HERMES_HOME / "skills"
 MANIFEST_FILE = SKILLS_DIR / ".bundled_manifest"
+DEFAULT_BUNDLED_SKILLS: set[str] = {
+    # Coding, debugging, and software delivery
+    "claude-code",
+    "codex",
+    "opencode",
+    "codebase-inspection",
+    "node-inspect-debugger",
+    "python-debugpy",
+    "systematic-debugging",
+    "test-driven-development",
+    "requesting-code-review",
+    "subagent-driven-development",
+    "writing-plans",
+    "plan",
+
+    # GitHub and release workflow
+    "github-auth",
+    "github-code-review",
+    "github-issues",
+    "github-pr-workflow",
+    "github-repo-management",
+
+    # Business productivity and documents
+    "airtable",
+    "google-workspace",
+    "himalaya",
+    "linear",
+    "notion",
+    "ocr-and-documents",
+    "nano-pdf",
+    "powerpoint",
+
+    # Research, markets, and knowledge work
+    "arxiv",
+    "blogwatcher",
+    "llm-wiki",
+    "polymarket",
+    "research-paper-writing",
+    "jupyter-live-kernel",
+
+    # Creator and marketing work
+    "architecture-diagram",
+    "claude-design",
+    "design-md",
+    "humanizer",
+    "popular-web-designs",
+    "youtube-content",
+    "xurl",
+
+    # Automation, integrations, and skill economy
+    "native-mcp",
+    "webhook-subscriptions",
+    "hermes-agent-skill-authoring",
+    "huggingface-hub",
+}
+
+
+def _bundled_skill_allowlist() -> set[str]:
+    """Return bundled skill names that should still be seeded by default.
+
+    NOTPUNKS no longer ships the upstream Hermes skill catalog as preinstalled
+    skills. Marketplace and user-created skills live in the local skills dir;
+    upstream examples remain in the repository for reference/optional use, but
+    they should not appear in the startup banner or prompt by default.
+    """
+    raw = os.getenv("NOTPUNKS_BUNDLED_SKILLS", "").strip()
+    if not raw:
+        return set(DEFAULT_BUNDLED_SKILLS)
+    if raw.lower() in {"0", "none", "off", "false"}:
+        return set()
+    if raw.lower() in {"*", "all"}:
+        return {"*"}
+    return {part.strip() for part in raw.split(",") if part.strip()}
 
 
 def _get_bundled_dir() -> Path:
@@ -140,12 +213,17 @@ def _discover_bundled_skills(bundled_dir: Path) -> List[Tuple[str, Path]]:
     if not bundled_dir.exists():
         return skills
 
+    allowlist = _bundled_skill_allowlist()
+    allow_all = "*" in allowlist
+
     for skill_md in bundled_dir.rglob("SKILL.md"):
         path_str = str(skill_md)
         if "/.git/" in path_str or "/.github/" in path_str or "/.hub/" in path_str:
             continue
         skill_dir = skill_md.parent
         skill_name = _read_skill_name(skill_md, skill_dir.name)
+        if not allow_all and skill_name not in allowlist:
+            continue
         skills.append((skill_name, skill_dir))
 
     return skills

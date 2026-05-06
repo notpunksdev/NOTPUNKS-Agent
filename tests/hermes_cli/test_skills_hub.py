@@ -59,6 +59,8 @@ def three_source_env(monkeypatch, hub_env):
     monkeypatch.setattr(hub, "HubLockFile", lambda: _DummyLockFile([_HUB_ENTRY]))
     monkeypatch.setattr(skills_tool, "_find_all_skills", lambda **_kwargs: list(_ALL_THREE_SKILLS))
     monkeypatch.setattr(skills_sync, "_read_manifest", lambda: dict(_BUILTIN_MANIFEST))
+    monkeypatch.setattr(skills_sync, "_bundled_skill_allowlist", lambda: {"*"})
+    monkeypatch.setattr(skills_sync, "sync_skills", lambda quiet=True: {})
 
     return hub_env
 
@@ -124,6 +126,7 @@ def test_do_list_initializes_hub_dir(monkeypatch, hub_env):
 
     monkeypatch.setattr(skills_tool, "_find_all_skills", lambda **_kwargs: [])
     monkeypatch.setattr(skills_sync, "_read_manifest", lambda: {})
+    monkeypatch.setattr(skills_sync, "sync_skills", lambda quiet=True: {})
 
     hub_dir = hub_env
     assert not hub_dir.exists()
@@ -134,6 +137,31 @@ def test_do_list_initializes_hub_dir(monkeypatch, hub_env):
     assert (hub_dir / "lock.json").exists()
     assert (hub_dir / "quarantine").is_dir()
     assert (hub_dir / "index-cache").is_dir()
+
+
+def test_do_list_hides_stale_builtin_manifest_entries(monkeypatch, hub_env):
+    import tools.skills_hub as hub
+    import tools.skills_sync as skills_sync
+    import tools.skills_tool as skills_tool
+
+    monkeypatch.setattr(hub, "HubLockFile", lambda: _DummyLockFile([]))
+    monkeypatch.setattr(
+        skills_tool,
+        "_find_all_skills",
+        lambda **_kwargs: [
+            {"name": "notion", "category": "productivity", "description": "curated"},
+            {"name": "dogfood", "category": "", "description": "stale upstream"},
+        ],
+    )
+    monkeypatch.setattr(skills_sync, "_read_manifest", lambda: {"notion": "abc", "dogfood": "def"})
+    monkeypatch.setattr(skills_sync, "_bundled_skill_allowlist", lambda: {"notion"})
+    monkeypatch.setattr(skills_sync, "sync_skills", lambda quiet=True: {})
+
+    output = _capture()
+
+    assert "notion" in output
+    assert "dogfood" not in output
+    assert "1 builtin, 0 local" in output
 
 
 def test_do_list_distinguishes_hub_builtin_and_local(three_source_env):

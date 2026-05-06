@@ -469,7 +469,10 @@ def _hosted_wallet_session_url(session_id: str, payload: str) -> str:
     return f"https://agent.notpunks.com/wallet-connect?{urllib.parse.urlencode(params)}"
 
 
-def _poll_hosted_wallet_session(session_id: str, timeout: float = 300.0) -> dict | None:
+HOSTED_WALLET_SESSION_TIMEOUT = 2 * 60 * 60
+
+
+def _poll_hosted_wallet_session(session_id: str, timeout: float = HOSTED_WALLET_SESSION_TIMEOUT) -> dict | None:
     import urllib.error
     import urllib.request
 
@@ -541,13 +544,14 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
         # Non-blocking mode (slash command): return immediately
         console.print(
             "[yellow]⏳ Waiting for connection in browser...\n"
-            "   After connecting your wallet, type /wallet status to verify.[/yellow]"
+            "   After connecting your wallet, type /wallet status to verify.\n"
+            "   This startup session stays open for up to 2 hours.[/yellow]"
         )
         import threading
 
         def _bg_wait():
             try:
-                data = _poll_hosted_wallet_session(session_id, timeout=300.0)
+                data = _poll_hosted_wallet_session(session_id)
                 if data:
                     wallet = _save_wallet_from_callback(data, network)
                     if wallet:
@@ -565,8 +569,8 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
         return 0
 
     # Blocking mode (CLI): wait for callback
-    console.print("[yellow]⏳ Waiting for wallet connection in browser... (timeout: 5 min)[/yellow]")
-    data = _poll_hosted_wallet_session(session_id, timeout=300.0)
+    console.print("[yellow]⏳ Waiting for wallet connection in browser... (timeout: 2 hours)[/yellow]")
+    data = _poll_hosted_wallet_session(session_id)
 
     if data is None:
         console.print("[red]Connection timed out.[/red]")
