@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import socket
+import subprocess
+import sys
 import threading
 import time
-from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -703,14 +704,102 @@ def _normalize_wizard_draft(value: Any) -> dict[str, Any]:
     }
 
 
+class SkillWizardAgentTimeout(TimeoutError):
+    """Raised when the local skill wizard model does not answer in time."""
+
+
+def _skill_wizard_timeout_seconds() -> float:
+    raw = os.getenv("NOTPUNKS_SKILL_WIZARD_TIMEOUT", "75")
+    try:
+        return max(float(raw), 1.0)
+    except ValueError:
+        return 75.0
+
+
 def _run_skill_wizard_agent(prompt: str) -> str:
     """Run the user's configured local NOTPUNKS Agent model for the web wizard."""
-    from hermes_cli.oneshot import _run_agent
+    timeout = _skill_wizard_timeout_seconds()
+    env = os.environ.copy()
+    env.setdefault("HERMES_YOLO_MODE", "1")
+    env.setdefault("HERMES_ACCEPT_HOOKS", "1")
+    env.setdefault("NOTPUNKS_ACCEPT_HOOKS", "1")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "hermes_cli.main", "-z", prompt],
+            capture_output=True,
+            env=env,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SkillWizardAgentTimeout(f"Local agent did not answer within {int(timeout)}s") from exc
+    if proc.returncode != 0:
+        details = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(details or f"Local agent exited with {proc.returncode}")
+    return (proc.stdout or "").strip()
 
-    stdout = StringIO()
-    stderr = StringIO()
-    with redirect_stdout(stdout), redirect_stderr(stderr):
-        return _run_agent(prompt)
+
+def _wizard_last_user_message(body: dict[str, Any]) -> str:
+    messages = body.get("messages") if isinstance(body.get("messages"), list) else []
+    for item in reversed(messages):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("role") or "user").strip().lower() != "user":
+            continue
+        content = str(item.get("content") or "").strip()
+        if content:
+            return content[:240]
+    return ""
+
+
+def _wizard_fallback_response(body: dict[str, Any], ctx: Any, reason: str) -> tuple[dict[str, Any], int]:
+    language = str(body.get("language") or "en").strip().lower()
+    action = str(body.get("action") or "chat").strip().lower()
+    topic = _wizard_last_user_message(body)
+    draft = _normalize_wizard_draft(body.get("draft"))
+    ru = language.startswith("ru")
+    topic_ru = topic or "этого Skill NFT"
+    topic_en = topic or "this Skill NFT"
+
+    if ru and action == "generate":
+        reply = (
+            "Локальный агент не успел сформировать финальный SKILL.md. "
+            "Продолжаем через интерфейс: добавьте, пожалуйста, недостающие детали по назначению skill, "
+            "разрешенным инструментам, ограничениям риска и критерию успешной проверки."
+        )
+    elif ru:
+        reply = (
+            f"Локальный агент не ответил вовремя, поэтому продолжаем диалог здесь. "
+            f"Для Skill NFT про «{topic_ru}» уточните:\n"
+            "1. Skill должен только анализировать рынки или также готовить/исполнять сделки?\n"
+            "2. Какие источники и инструменты ему разрешены: Polymarket API, браузер, кошелек, уведомления?\n"
+            "3. Какие ограничения риска нужны: лимит ставки, запрет автосделок, рынки, стоп-условия?\n"
+            "4. Какой результат считать успешным: тезис сделки, план ордера, мониторинг или отчет?"
+        )
+    elif action == "generate":
+        reply = (
+            "The local agent did not finish generating the final SKILL.md in time. "
+            "Continue in the interface by adding the skill purpose, allowed tools, risk boundaries, and success criteria."
+        )
+    else:
+        reply = (
+            f"The local agent did not answer in time, so we will continue in the interface. "
+            f"For the Skill NFT about \"{topic_en}\", please clarify:\n"
+            "1. Should the skill only analyze markets, or also prepare/execute trades?\n"
+            "2. Which sources and tools are allowed: Polymarket API, browser, wallet, notifications?\n"
+            "3. What risk limits are required: stake cap, no auto-trading, markets, stop conditions?\n"
+            "4. What counts as success: trade thesis, order plan, monitoring, or report?"
+        )
+    return {
+        "ok": True,
+        "reply": reply,
+        "done": False,
+        "draft": draft,
+        "missing": ["workflow", "tools", "boundaries", "verification"],
+        "agentFallback": True,
+        "warning": reason,
+        "walletAddress": getattr(ctx, "wallet_address", ""),
+    }, HTTPStatus.OK
 
 
 def _marketplace_skill_wizard_prompt(body: dict[str, Any]) -> str:
@@ -760,6 +849,8 @@ def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any]
     prompt = _marketplace_skill_wizard_prompt(body)
     try:
         raw = _run_skill_wizard_agent(prompt)
+    except SkillWizardAgentTimeout as exc:
+        return _wizard_fallback_response(body, ctx, str(exc))
     except Exception as exc:
         return {
             "ok": False,
@@ -769,6 +860,8 @@ def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any]
     parsed = _extract_json_object(raw)
     draft = _normalize_wizard_draft(parsed.get("draft"))
     reply = str(parsed.get("reply") or raw or "").strip()
+    if not reply:
+        return _wizard_fallback_response(body, ctx, "Local agent returned an empty wizard reply")
     done = bool(parsed.get("done"))
     missing = parsed.get("missing") if isinstance(parsed.get("missing"), list) else []
     return {

@@ -531,6 +531,84 @@ def test_local_bridge_skill_wizard_chat_uses_local_agent(monkeypatch):
         handle.stop()
 
 
+def test_local_bridge_skill_wizard_chat_falls_back_when_agent_times_out(monkeypatch):
+    import agent.wallet.context as wallet_context
+    import hermes_cli.local_bridge as local_bridge
+    from hermes_cli.local_bridge import start_local_bridge
+
+    monkeypatch.setattr(wallet_context, "build_wallet_context", lambda: SimpleNamespace(
+        wallet_address="EQcreator",
+        can_create_skills=True,
+        access_roles=["creator"],
+        matching_pair_numbers=[7],
+    ))
+
+    def fake_run_agent(_prompt):
+        raise local_bridge.SkillWizardAgentTimeout("Local agent did not answer within 75s")
+
+    monkeypatch.setattr(local_bridge, "_run_skill_wizard_agent", fake_run_agent)
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/wizard-chat",
+            body={
+                "action": "chat",
+                "language": "ru",
+                "messages": [{"role": "user", "content": "торговля на полимаркете"}],
+            },
+            origin="https://skilzzz.com",
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["done"] is False
+        assert payload["agentFallback"] is True
+        assert "продолжаем диалог здесь" in payload["reply"]
+        assert "полимаркете" in payload["reply"]
+        assert payload["walletAddress"] == "EQcreator"
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_skill_wizard_chat_falls_back_on_empty_agent_reply(monkeypatch):
+    import agent.wallet.context as wallet_context
+    import hermes_cli.local_bridge as local_bridge
+    from hermes_cli.local_bridge import start_local_bridge
+
+    monkeypatch.setattr(wallet_context, "build_wallet_context", lambda: SimpleNamespace(
+        wallet_address="EQcreator",
+        can_create_skills=True,
+        access_roles=["creator"],
+        matching_pair_numbers=[7],
+    ))
+    monkeypatch.setattr(local_bridge, "_run_skill_wizard_agent", lambda _prompt: "")
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/wizard-chat",
+            body={
+                "action": "chat",
+                "language": "en",
+                "messages": [{"role": "user", "content": "polymarket trading"}],
+            },
+            origin="https://skilzzz.com",
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["done"] is False
+        assert payload["agentFallback"] is True
+        assert "continue in the interface" in payload["reply"]
+    finally:
+        handle.stop()
+
+
 def test_local_bridge_skill_wizard_generate_instruction(monkeypatch):
     import agent.wallet.context as wallet_context
     import hermes_cli.local_bridge as local_bridge
