@@ -5,7 +5,7 @@
 <h1 align="center">NOTPUNKS Agent</h1>
 
 <p align="center">
-  Local-first AI agent for terminal work, messaging, wallet-gated skills, and portable sNFT skill cartridges.
+  Local-first AI agent for terminal work, messaging, wallet-gated skills, and private sNFT skill cartridges.
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ NOTPUNKS_AGENT :: LOCAL_FIRST_AI_OPERATOR
 
 NOTPUNKS Agent is an open-source AI operator that runs on your own machine, VPS, or cloud environment. It can work in the terminal, edit files, run tools, use browser/search, remember project context, operate through messaging platforms, and install wallet-gated skills from the NOTPUNKS marketplace.
 
-The project extends the agent model with **sNFT Protocol**, a Skill NFT format for packaging reusable agent workflows as verifiable, portable skill cartridges.
+The project extends the agent model with **sNFT Protocol**, a Skill NFT format for packaging reusable agent workflows as verifiable, portable, private skill cartridges.
 
 ## Install
 
@@ -88,9 +88,9 @@ Supported environments: Linux, macOS, WSL2, and Android through Termux. Native W
 | Model choice | OpenRouter, OpenAI/Codex-compatible providers, Anthropic, Gemini, Bedrock, Hugging Face, NVIDIA NIM, Kimi/Moonshot, Ollama/vLLM/LM Studio-style local endpoints, and custom providers. |
 | Messaging gateway | Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, Email, SMS, Home Assistant, webhooks, and HTTP/API gateway mode. |
 | Wallet access | TON Connect wallet flow for NFT access, creator gates, Skill NFT licenses, and marketplace permissions. |
-| Protected sNFT runtime | Encrypted Skill NFT cartridges install without public plaintext source and execute through the agent runtime after ownership unlock. |
+| Protected sNFT runtime | Secret encrypted Skill NFT cartridges install without public plaintext source and execute through the agent runtime after ownership unlock. |
 | Skills | Create, install, inspect, audit, publish, unpublish, buy, license-check, and install marketplace skills. |
-| sNFT Protocol | Package skills as verifiable cartridges with metadata, bundle hash, access policy, license data, and portable install fields. |
+| sNFT Protocol | Package skills as verifiable private cartridges with metadata, bundle hash, access policy, license data, and portable install fields. |
 | Open source | MIT-licensed codebase you can inspect, fork, self-host, extend, and integrate. |
 
 ## Quick Start
@@ -151,9 +151,9 @@ An sNFT cartridge can include:
 - marketplace and metadata URLs;
 - security scan verdict and findings;
 - install data for compatible agents;
-- optional encrypted payload reference for future cartridge formats.
+- encrypted private payload reference for protected paid cartridges.
 
-The NFT is not just an image. It becomes a portable license and distribution primitive for executable agent knowledge.
+The NFT is not just an image. It becomes a portable license and distribution primitive for executable agent knowledge. For protected paid skills, the marketplace can expose public metadata and hashes while the full skill source stays inside a secret encrypted cartridge unlocked only through wallet ownership and a compatible runtime.
 
 ## Access Model
 

@@ -4,14 +4,14 @@ sidebar_position: 12
 
 # sNFT Protocol
 
-sNFT Protocol (Skill NFT Protocol) packages an installable agent skill as an NFT-backed cartridge.
-The NFT metadata points to encrypted cartridge bytes, while the issuer unlock endpoint releases the
+sNFT Protocol (Skill NFT Protocol) packages an installable agent skill as an NFT-backed private cartridge.
+The NFT metadata points to secret encrypted cartridge bytes, while the issuer unlock endpoint releases the
 decryption material only after the wallet/license check succeeds.
 
 ## Goals
 
 - Keep skill code portable across agents that implement the protocol.
-- Let creators distribute paid skills without exposing the full bundle publicly.
+- Let creators distribute paid skills without exposing the full private source publicly.
 - Keep the cartridge self-describing through standard NFT metadata.
 - Preserve local installation safety: decrypt, verify hashes, unpack safely, scan, then install.
 
@@ -100,7 +100,7 @@ against the metadata URL.
 10. Extract the tar.gz using safe path checks.
 11. Verify the deterministic skill manifest hash against `bundle_hash` when present.
 12. Run the normal skill security scan.
-13. Install only if the scan policy allows it, or if the user explicitly passes `--force` for caution-level findings.
+13. Install a protected stub or mount the skill only if the scan policy allows it, or if the user explicitly passes `--force` for caution-level findings.
 
 ## Multi-Chain Unlock Request
 
@@ -177,7 +177,7 @@ python scripts/snft_verify.py https://app.notpunks.com/api/skills/marketplace/de
   --unlock-token "$NOTPUNKS_MARKETPLACE_UNLOCK_TOKEN"
 ```
 
-The verifier fetches metadata, downloads the encrypted cartridge, checks hashes, asks the issuer
+The verifier fetches metadata, downloads the secret encrypted cartridge, checks hashes, asks the issuer
 unlock endpoint for AES-GCM material, decrypts the bundle, verifies the plaintext hash, and prints
 the files inside the cartridge. It does not install the skill.
 
@@ -192,3 +192,8 @@ v1 treats the unlock endpoint as the enforcement boundary. The endpoint must ver
 When the TON Skill NFT collection contract is deployed, clients do not need a new cartridge format.
 Only the issuer unlock implementation changes from local/mock license records to on-chain ownership
 verification and royalty settlement.
+
+Protected sNFT is practical creator protection, not an absolute local DRM claim:
+the public marketplace does not serve raw `SKILL.md`, compatible agents avoid
+plaintext source export for protected paid cartridges, and official unlock
+services can require wallet ownership plus runtime build attestation.

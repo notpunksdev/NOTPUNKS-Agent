@@ -260,6 +260,24 @@ The `patch` action is preferred for updates — it's more token-efficient than `
 
 Browse, search, install, and manage skills from online registries, `skills.sh`, direct well-known skill endpoints, and official optional skills.
 
+## Protected sNFT Skills
+
+Marketplace skills can also be distributed as protected sNFT cartridges. In
+that mode, the public marketplace exposes metadata, hashes, license policy, and
+install intent data, while the private skill source stays inside a secret
+encrypted cartridge.
+
+The agent verifies wallet ownership, requests unlock material from the issuer,
+checks cartridge hashes, scans the decrypted package, and runs it through the
+protected runtime path. Compatible agents should avoid exporting raw `SKILL.md`
+for protected paid cartridges or writing plaintext source as a normal public
+install.
+
+This is a creator-distribution control for the official marketplace and
+compatible runtimes. It keeps private source out of public downloads, but it is
+not a promise that plaintext can never be observed after an authorized owner
+unlocks and runs the skill on their own machine.
+
 ### Common commands
 
 ```bash
