@@ -466,7 +466,7 @@ def _hosted_wallet_session_url(session_id: str, payload: str) -> str:
         "session_id": session_id,
         "payload": payload,
     }
-    return f"https://skilzzz.com/pair-agent?{urllib.parse.urlencode(params)}"
+    return f"https://agent.notpunks.com/wallet-connect?{urllib.parse.urlencode(params)}"
 
 
 HOSTED_WALLET_SESSION_TIMEOUT = 2 * 60 * 60
@@ -477,7 +477,7 @@ def _poll_hosted_wallet_session(session_id: str, timeout: float = HOSTED_WALLET_
     import urllib.request
 
     deadline = time.time() + timeout
-    url = f"https://skilzzz.com/api/wallet-connect/sessions/{session_id}"
+    url = f"https://agent.notpunks.com/api/wallet-connect/sessions/{session_id}"
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=10) as response:
