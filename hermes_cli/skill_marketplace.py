@@ -916,6 +916,32 @@ def _snft_unlock_endpoint(snft: dict[str, Any], metadata_url: str = "") -> str:
                 if candidate:
                     endpoint = candidate
                     break
+    if not endpoint:
+        registry_url = str(unlock.get("registry") or "")
+        if registry_url and metadata_url:
+            registry_url = urljoin(metadata_url, registry_url)
+        if registry_url:
+            import httpx
+
+            response = httpx.get(registry_url, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            registry = payload.get("data") if isinstance(payload, dict) and isinstance(payload.get("data"), dict) else payload
+            if isinstance(registry, dict):
+                endpoint = str(registry.get("endpoint") or "")
+                nodes = registry.get("nodes")
+                if not endpoint and isinstance(nodes, list):
+                    skill_id = str(snft.get("skill_id") or "")
+                    for node in nodes:
+                        if not isinstance(node, dict):
+                            continue
+                        candidate = str(node.get("url") or node.get("endpoint") or "")
+                        template = str(node.get("url_template") or "")
+                        if not candidate and template and skill_id:
+                            candidate = template.replace("{skill_id}", skill_id)
+                        if candidate:
+                            endpoint = candidate
+                            break
     if endpoint and metadata_url:
         endpoint = urljoin(metadata_url, endpoint)
     return endpoint

@@ -79,6 +79,46 @@ def test_snft_unlock_endpoint_can_use_unlock_node_url():
     assert _snft_unlock_endpoint(snft, "https://issuer.example/snft/alpha/metadata.json") == "https://issuer.example/snft/alpha/unlock"
 
 
+def test_snft_unlock_endpoint_can_use_registry_url(monkeypatch):
+    snft = {
+        "skill_id": "alpha",
+        "unlock": {
+            "type": "notpunks_unlock_network",
+            "scheme": "direct_key_v1",
+            "threshold": 1,
+            "registry": "unlock-networks/notpunks-mainnet-1",
+        }
+    }
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "success": True,
+                "data": {
+                    "nodes": [
+                        {
+                            "id": "notpunks-backend-1",
+                            "url_template": "https://issuer.example/snft/{skill_id}/unlock",
+                        }
+                    ]
+                },
+            }
+
+    seen = {}
+
+    def fake_get(url, timeout=30):
+        seen["url"] = url
+        return _Response()
+
+    monkeypatch.setattr("httpx.get", fake_get)
+
+    assert _snft_unlock_endpoint(snft, "https://issuer.example/snft/alpha/metadata.json") == "https://issuer.example/snft/alpha/unlock"
+    assert seen["url"] == "https://issuer.example/snft/alpha/unlock-networks/notpunks-mainnet-1"
+
+
 def test_check_skill_access_accepts_holder_and_license():
     holder_ctx = SimpleNamespace(
         can_use_custom_skills=True,
