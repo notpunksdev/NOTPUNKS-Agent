@@ -199,6 +199,13 @@ def _mint_supply_max(model: str, value: Any) -> int | None:
     return None
 
 
+def _normalize_nft_issue_mode(value: Any) -> str:
+    mode = str(value or "single_nft").strip().lower().replace("-", "_")
+    if mode in {"single_nft", "new_collection", "existing_collection"}:
+        return mode
+    return "single_nft"
+
+
 def build_skill_nft_metadata(
     listing: dict[str, Any],
     bundle_manifest: dict[str, Any],
@@ -213,6 +220,8 @@ def build_skill_nft_metadata(
     branded_description = _brand_public_text(listing.get("description", ""))
     mint_model = _normalize_mint_model(listing.get("mint_model"))
     supply_max = _mint_supply_max(mint_model, listing.get("mint_supply_max"))
+    issue_mode = _normalize_nft_issue_mode(listing.get("nft_issue_mode"))
+    collection_id = _slug(str(listing.get("collection_id") or listing.get("collection_name") or skill_id))
     collection_name = str(listing.get("collection_name") or branded_name).strip()
     payload = {
         "name": f"NOTPUNKS Skill NFT: {branded_name}",
@@ -243,7 +252,9 @@ def build_skill_nft_metadata(
             {"trait_type": "License", "value": license_kind},
         ],
         "mint": {
+            "issue_mode": issue_mode,
             "model": mint_model,
+            "collection_id": collection_id,
             "collection_name": collection_name,
             "supply": {"max": supply_max, "minted": 0},
             "contract": {
@@ -362,6 +373,8 @@ def build_listing(
     mint_model: str = "open_edition",
     mint_supply_max: int | None = None,
     collection_name: str = "",
+    collection_id: str = "",
+    nft_issue_mode: str = "single_nft",
 ) -> dict[str, Any]:
     from tools.skills_guard import scan_skill
 
@@ -378,6 +391,11 @@ def build_listing(
     normalized_mint_model = _normalize_mint_model(mint_model)
     normalized_supply_max = _mint_supply_max(normalized_mint_model, mint_supply_max)
     normalized_collection_name = collection_name.strip() or _brand_public_text(name)
+    normalized_collection_id = _slug(collection_id or normalized_collection_name or skill_id)
+    normalized_issue_mode = _normalize_nft_issue_mode(nft_issue_mode)
+    if normalized_issue_mode == "single_nft":
+        normalized_mint_model = "one_of_one"
+        normalized_supply_max = 1
     nft_metadata = build_skill_nft_metadata(
         {
             "skill_id": skill_id,
@@ -391,6 +409,8 @@ def build_listing(
             "mint_model": normalized_mint_model,
             "mint_supply_max": normalized_supply_max,
             "collection_name": normalized_collection_name,
+            "collection_id": normalized_collection_id,
+            "nft_issue_mode": normalized_issue_mode,
         },
         bundle_manifest,
         bundle_url,
@@ -408,6 +428,8 @@ def build_listing(
         "mint_model": normalized_mint_model,
         "mint_supply_max": normalized_supply_max,
         "collection_name": normalized_collection_name,
+        "collection_id": normalized_collection_id,
+        "nft_issue_mode": normalized_issue_mode,
         "access": access or {"policy": "holders"},
         "bundle": {
             **bundle_manifest,

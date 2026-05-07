@@ -692,6 +692,9 @@ def _normalize_wizard_draft(value: Any) -> dict[str, Any]:
         mint_supply_max = 1
     elif mint_model == "open_edition":
         mint_supply_max = 0
+    issue_mode = str(source.get("nftIssueMode") or source.get("nft_issue_mode") or "single_nft").strip().lower().replace("-", "_")
+    if issue_mode not in {"single_nft", "new_collection", "existing_collection"}:
+        issue_mode = "single_nft"
     return {
         "name": name if name != "skill" else "",
         "category": category or "marketplace",
@@ -700,6 +703,8 @@ def _normalize_wizard_draft(value: Any) -> dict[str, Any]:
         "priceTon": max(price_ton, 0.0),
         "mintModel": mint_model,
         "mintSupplyMax": max(mint_supply_max, 0),
+        "nftIssueMode": issue_mode,
+        "collectionId": str(source.get("collectionId") or source.get("collection_id") or "").strip(),
         "collectionName": str(source.get("collectionName") or source.get("collection_name") or "").strip(),
     }
 
@@ -933,6 +938,10 @@ def _create_marketplace_skill_draft(body: dict[str, Any]) -> tuple[dict[str, Any
         mint_supply_max = 1
     elif mint_model == "open_edition":
         mint_supply_max = 0
+    nft_issue_mode = str(body.get("nftIssueMode") or "single_nft").strip().lower().replace("-", "_")
+    if nft_issue_mode not in {"single_nft", "new_collection", "existing_collection"}:
+        nft_issue_mode = "single_nft"
+    collection_id = _skill_slug(str(body.get("collectionId") or "").strip())
     collection_name = str(body.get("collectionName") or "").strip()
 
     from tools.skill_manager_tool import _create_skill
@@ -953,6 +962,8 @@ def _create_marketplace_skill_draft(body: dict[str, Any]) -> tuple[dict[str, Any
         mint_model=mint_model,
         mint_supply_max=mint_supply_max or None,
         collection_name=collection_name,
+        collection_id=collection_id,
+        nft_issue_mode=nft_issue_mode,
     )
     listing_path = save_listing(listing)
     status_rows = list_installed_marketplace_skills(name)
@@ -998,6 +1009,10 @@ def _publish_marketplace_skill_draft(body: dict[str, Any]) -> tuple[dict[str, An
         mint_supply_max = 1
     elif mint_model == "open_edition":
         mint_supply_max = 0
+    nft_issue_mode = str(body.get("nftIssueMode") or "single_nft").strip().lower().replace("-", "_")
+    if nft_issue_mode not in {"single_nft", "new_collection", "existing_collection"}:
+        nft_issue_mode = "single_nft"
+    collection_id = _skill_slug(str(body.get("collectionId") or "").strip())
     collection_name = str(body.get("collectionName") or "").strip()
 
     from hermes_cli.skill_marketplace import (
@@ -1019,6 +1034,8 @@ def _publish_marketplace_skill_draft(body: dict[str, Any]) -> tuple[dict[str, An
         mint_model=mint_model,
         mint_supply_max=mint_supply_max or None,
         collection_name=collection_name,
+        collection_id=collection_id,
+        nft_issue_mode=nft_issue_mode,
     )
     listing["access"] = {"policy": "skill_nft"}
     listing.setdefault("nft_metadata", {}).setdefault("license", {})
