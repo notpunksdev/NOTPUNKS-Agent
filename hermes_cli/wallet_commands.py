@@ -466,7 +466,7 @@ def _hosted_wallet_session_url(session_id: str, payload: str) -> str:
         "session_id": session_id,
         "payload": payload,
     }
-    return f"https://agent.notpunks.com/wallet-connect?{urllib.parse.urlencode(params)}"
+    return f"https://skilzzz.com/wallet-connect?{urllib.parse.urlencode(params)}"
 
 
 HOSTED_WALLET_SESSION_TIMEOUT = 2 * 60 * 60
@@ -477,7 +477,7 @@ def _poll_hosted_wallet_session(session_id: str, timeout: float = HOSTED_WALLET_
     import urllib.request
 
     deadline = time.time() + timeout
-    url = f"https://agent.notpunks.com/api/wallet-connect/sessions/{session_id}"
+    url = f"https://skilzzz.com/api/wallet-connect/sessions/{session_id}"
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=10) as response:
@@ -494,7 +494,7 @@ def _poll_hosted_wallet_session(session_id: str, timeout: float = HOSTED_WALLET_
 def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False) -> int:
     """Web-based TON wallet connection flow.
 
-    Uses the hosted agent.notpunks.com wallet relay so remote servers do not
+    Uses the hosted Skilzzz wallet relay so remote servers do not
     depend on Cloudflare quick tunnels or localhost browser callbacks.
 
     Args:
@@ -518,7 +518,7 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
         return 0
 
     console.print("[bold]◆ NOTPUNKS TON Wallet Connect (Web)[/bold]")
-    console.print("Creating hosted wallet session on agent.notpunks.com...\n")
+    console.print("Creating hosted wallet session on Skilzzz...\n")
 
     import uuid as _uuid
 

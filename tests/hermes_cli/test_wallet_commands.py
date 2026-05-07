@@ -30,7 +30,7 @@ def test_cloudflared_path_uses_hermes_home(tmp_path, monkeypatch):
     assert path == str(cf_path)
 
 
-def test_wallet_connect_web_uses_agent_hosted_page(monkeypatch):
+def test_wallet_connect_web_uses_skilzzz_hosted_page(monkeypatch):
     printed = []
     opened = []
 
@@ -46,7 +46,7 @@ def test_wallet_connect_web_uses_agent_hosted_page(monkeypatch):
     assert wallet_commands._wallet_connect_web(console=Console(), blocking=True, force=True) == 1
 
     assert opened
-    assert opened[0].startswith("https://agent.notpunks.com/wallet-connect?")
+    assert opened[0].startswith("https://skilzzz.com/wallet-connect?")
     assert "session_id=" in opened[0]
     assert "payload=notpunks-" in opened[0]
     assert "callback_url=" not in opened[0]
