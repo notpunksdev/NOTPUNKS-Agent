@@ -197,13 +197,30 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 def _local_wallet_summary() -> dict[str, Any]:
     try:
+        from agent.wallet.context import build_wallet_context
+
+        ctx = build_wallet_context()
+    except Exception:
+        ctx = None
+    if ctx:
+        return {
+            "connected": bool(getattr(ctx, "wallet_address", "")),
+            "address": str(getattr(ctx, "wallet_address", "") or "").strip(),
+            "network": str(getattr(ctx, "network", "") or "").strip(),
+            "canCreateSkills": bool(getattr(ctx, "can_create_skills", False)),
+            "canPublishSkills": bool(getattr(ctx, "can_publish_skills", False)),
+            "roles": list(getattr(ctx, "access_roles", []) or []),
+            "tiers": list(getattr(ctx, "access_tiers", []) or []),
+            "matchingPairs": list(getattr(ctx, "matching_pair_numbers", []) or []),
+        }
+    try:
         from hermes_cli.config import load_config
     except Exception:
-        return {"connected": False, "address": "", "network": ""}
+        return {"connected": False, "address": "", "network": "", "canCreateSkills": False, "canPublishSkills": False}
     try:
         config = load_config()
     except Exception:
-        return {"connected": False, "address": "", "network": ""}
+        return {"connected": False, "address": "", "network": "", "canCreateSkills": False, "canPublishSkills": False}
     wallet = config.get("wallet") if isinstance(config, dict) else {}
     wallet = wallet if isinstance(wallet, dict) else {}
     address = str(wallet.get("address") or "").strip()
@@ -211,6 +228,8 @@ def _local_wallet_summary() -> dict[str, Any]:
         "connected": bool(address),
         "address": address,
         "network": str(wallet.get("network") or "").strip(),
+        "canCreateSkills": False,
+        "canPublishSkills": False,
     }
 
 
