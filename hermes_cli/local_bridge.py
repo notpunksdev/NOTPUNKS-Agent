@@ -155,6 +155,24 @@ def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[s
         return
 
 
+def _stream_response_start(handler: BaseHTTPRequestHandler, status: int = HTTPStatus.OK) -> None:
+    handler.send_response(status)
+    _write_cors_headers(handler)
+    handler.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+    handler.send_header("Cache-Control", "no-cache, no-transform")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.end_headers()
+
+
+def _stream_json_event(handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> bool:
+    try:
+        handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n")
+        handler.wfile.flush()
+        return True
+    except (BrokenPipeError, ConnectionResetError):
+        return False
+
+
 def _origin_allowed(origin: str) -> bool:
     return not origin or origin in ALLOWED_ORIGINS
 
@@ -491,6 +509,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     "GET /api/skills/marketplace/status",
                     "POST /api/skills/marketplace/ai-scan",
                     "POST /api/skills/marketplace/wizard-chat",
+                    "POST /api/skills/marketplace/wizard-chat/stream",
                     "POST /api/skills/marketplace/create-draft",
                     "POST /api/skills/marketplace/publish-draft",
                     "POST /api/skills/marketplace/install",
@@ -567,6 +586,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if parsed.path not in {
             "/api/skills/marketplace/ai-scan",
             "/api/skills/marketplace/wizard-chat",
+            "/api/skills/marketplace/wizard-chat/stream",
             "/api/skills/marketplace/create-draft",
             "/api/skills/marketplace/publish-draft",
             "/api/skills/marketplace/install",
@@ -582,6 +602,9 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             payload, status = _ai_scan_marketplace_skill(body)
         elif parsed.path == "/api/skills/marketplace/wizard-chat":
             payload, status = _marketplace_skill_wizard_chat(body)
+        elif parsed.path == "/api/skills/marketplace/wizard-chat/stream":
+            _marketplace_skill_wizard_chat_stream(self, body)
+            return
         elif parsed.path == "/api/skills/marketplace/create-draft":
             payload, status = _create_marketplace_skill_draft(body)
         elif parsed.path == "/api/skills/marketplace/publish-draft":
@@ -744,6 +767,48 @@ def _run_skill_wizard_agent(prompt: str) -> str:
     return (proc.stdout or "").strip()
 
 
+def _run_skill_wizard_agent_with_progress(prompt: str, on_progress: Callable[[str], bool]) -> str:
+    """Run the local wizard process while emitting heartbeat events to the web UI."""
+    timeout = _skill_wizard_timeout_seconds()
+    env = os.environ.copy()
+    env.setdefault("HERMES_YOLO_MODE", "1")
+    env.setdefault("HERMES_ACCEPT_HOOKS", "1")
+    env.setdefault("NOTPUNKS_ACCEPT_HOOKS", "1")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "hermes_cli.main", "-z", prompt],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        text=True,
+    )
+    started = time.monotonic()
+    next_progress = started
+    while proc.poll() is None:
+        now = time.monotonic()
+        if now - started >= timeout:
+            proc.kill()
+            try:
+                proc.communicate(timeout=2)
+            except Exception:
+                pass
+            raise SkillWizardAgentTimeout(f"Local agent did not answer within {int(timeout)}s")
+        if now >= next_progress:
+            if not on_progress("thinking"):
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except Exception:
+                    proc.kill()
+                raise RuntimeError("Wizard stream was closed by the browser")
+            next_progress = now + 2.0
+        time.sleep(0.1)
+    stdout, stderr = proc.communicate()
+    if proc.returncode != 0:
+        details = (stderr or stdout or "").strip()
+        raise RuntimeError(details or f"Local agent exited with {proc.returncode}")
+    return (stdout or "").strip()
+
+
 def _wizard_last_user_message(body: dict[str, Any]) -> str:
     messages = body.get("messages") if isinstance(body.get("messages"), list) else []
     for item in reversed(messages):
@@ -877,6 +942,65 @@ def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any]
         "missing": [str(item) for item in missing],
         "walletAddress": getattr(ctx, "wallet_address", ""),
     }, HTTPStatus.OK
+
+
+def _stream_wizard_reply(handler: BaseHTTPRequestHandler, payload: dict[str, Any]) -> None:
+    reply = str(payload.get("reply") or "")
+    for index in range(0, len(reply), 48):
+        if not _stream_json_event(handler, {"type": "delta", "delta": reply[index:index + 48]}):
+            return
+        time.sleep(0.01)
+    _stream_json_event(handler, {"type": "done", "response": payload})
+
+
+def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body: dict[str, Any]) -> None:
+    ctx, error = _require_beta_wallet()
+    if error:
+        _json_response(handler, HTTPStatus.FORBIDDEN if error.get("walletAddress") else HTTPStatus.CONFLICT, error)
+        return
+
+    prompt = _marketplace_skill_wizard_prompt(body)
+    _stream_response_start(handler)
+    if not _stream_json_event(handler, {
+        "type": "status",
+        "status": "started",
+        "message": "Local NOTPUNKS Agent started the wizard request",
+        "walletAddress": getattr(ctx, "wallet_address", ""),
+    }):
+        return
+
+    try:
+        raw = _run_skill_wizard_agent_with_progress(
+            prompt,
+            lambda status: _stream_json_event(handler, {"type": "status", "status": status}),
+        )
+    except SkillWizardAgentTimeout as exc:
+        payload, _status = _wizard_fallback_response(body, ctx, str(exc))
+        _stream_wizard_reply(handler, payload)
+        return
+    except Exception as exc:
+        _stream_json_event(handler, {
+            "type": "error",
+            "error": f"Local agent LLM call failed: {exc}",
+        })
+        return
+
+    parsed = _extract_json_object(raw)
+    draft = _normalize_wizard_draft(parsed.get("draft"))
+    reply = str(parsed.get("reply") or raw or "").strip()
+    if not reply:
+        payload, _status = _wizard_fallback_response(body, ctx, "Local agent returned an empty wizard reply")
+        _stream_wizard_reply(handler, payload)
+        return
+    missing = parsed.get("missing") if isinstance(parsed.get("missing"), list) else []
+    _stream_wizard_reply(handler, {
+        "ok": True,
+        "reply": reply,
+        "done": bool(parsed.get("done")),
+        "draft": draft,
+        "missing": [str(item) for item in missing],
+        "walletAddress": getattr(ctx, "wallet_address", ""),
+    })
 
 
 def _require_beta_wallet() -> tuple[Any | None, dict[str, Any] | None]:

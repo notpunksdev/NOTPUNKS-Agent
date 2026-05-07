@@ -42,6 +42,35 @@ def _request(
     return response.status, dict(response.headers), payload
 
 
+def _stream_request(
+    port: int,
+    path: str,
+    *,
+    body=None,
+    origin="https://app.notpunks.com",
+):
+    token_status, _token_headers, token_payload = _request(
+        port,
+        "GET",
+        "/api/skills/marketplace/status",
+        origin=origin,
+        bridge_token=False,
+    )
+    assert token_status == 200
+    headers = {
+        "Origin": origin,
+        "Content-Type": "application/json",
+        "X-NOTPUNKS-Bridge-Token": token_payload["bridgeToken"],
+    }
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("POST", path, body=json.dumps(body or {}), headers=headers)
+    response = conn.getresponse()
+    raw = response.read()
+    conn.close()
+    events = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
+    return response.status, dict(response.headers), events
+
+
 def _install_signature(name="alpha", wallet="EQwallet", bundle_hash="", metadata_url="", mode="install", force=False):
     payload = {
         "protocol": "notpunks-skill-install",
@@ -527,6 +556,51 @@ def test_local_bridge_skill_wizard_chat_uses_local_agent(monkeypatch):
         assert "local NOTPUNKS Agent" in prompts[0]
         assert "Action: chat" in prompts[0]
         assert "Хочу skill" in prompts[0]
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_skill_wizard_chat_streams_local_agent_reply(monkeypatch):
+    import agent.wallet.context as wallet_context
+    import hermes_cli.local_bridge as local_bridge
+    from hermes_cli.local_bridge import start_local_bridge
+
+    monkeypatch.setattr(wallet_context, "build_wallet_context", lambda: SimpleNamespace(
+        wallet_address="EQcreator",
+        can_create_skills=True,
+        access_roles=["creator"],
+        matching_pair_numbers=[7],
+    ))
+    monkeypatch.setattr(local_bridge, "_run_skill_wizard_agent_with_progress", lambda _prompt, on_progress: (
+        on_progress("thinking") and json.dumps({
+            "reply": "Какой результат должен проверять skill?",
+            "done": False,
+            "draft": {"name": "wallet-debug", "category": "debugging", "priceTon": 1},
+            "missing": ["verification"],
+        })
+    ))
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, headers, events = _stream_request(
+            handle.port,
+            "/api/skills/marketplace/wizard-chat/stream",
+            body={
+                "action": "chat",
+                "language": "ru",
+                "messages": [{"role": "user", "content": "Хочу skill для проверки кошелька"}],
+            },
+            origin="https://skilzzz.com",
+        )
+        assert status == 200
+        content_type = headers.get("Content-Type") or headers.get("content-type") or ""
+        assert content_type.startswith("application/x-ndjson")
+        assert events[0]["type"] == "status"
+        assert any(event.get("type") == "delta" and "Какой результат" in event.get("delta", "") for event in events)
+        assert events[-1]["type"] == "done"
+        assert events[-1]["response"]["draft"]["name"] == "wallet-debug"
+        assert events[-1]["response"]["missing"] == ["verification"]
     finally:
         handle.stop()
 
