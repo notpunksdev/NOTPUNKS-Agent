@@ -903,6 +903,24 @@ def _snft_unlock_challenge(snft: dict[str, Any], chain: dict[str, Any]) -> str:
     return challenge
 
 
+def _snft_unlock_endpoint(snft: dict[str, Any], metadata_url: str = "") -> str:
+    unlock = snft.get("unlock") if isinstance(snft.get("unlock"), dict) else {}
+    endpoint = str(unlock.get("endpoint") or "")
+    if not endpoint:
+        nodes = unlock.get("nodes")
+        if isinstance(nodes, list):
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                candidate = str(node.get("url") or node.get("endpoint") or "")
+                if candidate:
+                    endpoint = candidate
+                    break
+    if endpoint and metadata_url:
+        endpoint = urljoin(metadata_url, endpoint)
+    return endpoint
+
+
 def _build_snft_ton_unlock_request(
     *,
     skill_id: str,
@@ -1890,9 +1908,7 @@ def _install_snft_marketplace_skill(
                 challenge=challenge,
             )
 
-    unlock_endpoint = str((snft.get("unlock") if isinstance(snft.get("unlock"), dict) else {}).get("endpoint") or "")
-    if unlock_endpoint and metadata_url:
-        unlock_endpoint = urljoin(metadata_url, unlock_endpoint)
+    unlock_endpoint = _snft_unlock_endpoint(snft, metadata_url)
     unlock_url = unlock_endpoint or (
         urljoin(metadata_url, "unlock")
         if metadata_url

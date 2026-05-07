@@ -19,6 +19,7 @@ from hermes_cli.skill_marketplace import (
     _snft_browser_signer_config,
     _snft_evm_typed_data,
     _snft_solana_message,
+    _snft_unlock_endpoint,
     publish_proof_payload,
     publish_listing_remote,
     nft_metadata_dir,
@@ -58,6 +59,24 @@ def test_listing_defaults_to_holder_access(tmp_path, monkeypatch):
     assert loaded["security"]["verdict"] in {"safe", "caution", "dangerous"}
     assert (bundles_dir() / "alpha.tar.gz").exists()
     assert (nft_metadata_dir() / "alpha.json").exists()
+
+
+def test_snft_unlock_endpoint_can_use_unlock_node_url():
+    snft = {
+        "unlock": {
+            "type": "notpunks_unlock_network",
+            "scheme": "direct_key_v1",
+            "threshold": 1,
+            "nodes": [
+                {
+                    "id": "notpunks-backend-1",
+                    "url": "unlock",
+                }
+            ],
+        }
+    }
+
+    assert _snft_unlock_endpoint(snft, "https://issuer.example/snft/alpha/metadata.json") == "https://issuer.example/snft/alpha/unlock"
 
 
 def test_check_skill_access_accepts_holder_and_license():
