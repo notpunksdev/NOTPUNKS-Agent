@@ -58,11 +58,11 @@ irm https://agent.notpunks.com/install.ps1 | iex
 Prefer fixed release archives instead of a remote installer:
 
 ```text
-Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.5/NOTPUNKS-Agent-0.11.5-linux-x64.tar.gz
-macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.5/NOTPUNKS-Agent-0.11.5-macos-arm64.tar.gz
-Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.5/NOTPUNKS-Agent-0.11.5-windows-wsl.zip
-Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.5/checksums.txt
-Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.5/build-hashes.txt
+Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/NOTPUNKS-Agent-0.11.6-linux-x64.tar.gz
+macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/NOTPUNKS-Agent-0.11.6-macos-arm64.tar.gz
+Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/NOTPUNKS-Agent-0.11.6-windows-wsl.zip
+Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/checksums.txt
+Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/build-hashes.txt
 ```
 
 Start the agent:
@@ -88,6 +88,7 @@ Supported environments: Linux, macOS, WSL2, and Android through Termux. Native W
 | Model choice | OpenRouter, OpenAI/Codex-compatible providers, Anthropic, Gemini, Bedrock, Hugging Face, NVIDIA NIM, Kimi/Moonshot, Ollama/vLLM/LM Studio-style local endpoints, and custom providers. |
 | Messaging gateway | Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, Email, SMS, Home Assistant, webhooks, and HTTP/API gateway mode. |
 | Wallet access | TON Connect wallet flow for NFT access, creator gates, Skill NFT licenses, and marketplace permissions. |
+| Protected sNFT runtime | Encrypted Skill NFT cartridges install without public plaintext source and execute through the agent runtime after ownership unlock. |
 | Skills | Create, install, inspect, audit, publish, unpublish, buy, license-check, and install marketplace skills. |
 | sNFT Protocol | Package skills as verifiable cartridges with metadata, bundle hash, access policy, license data, and portable install fields. |
 | Open source | MIT-licensed codebase you can inspect, fork, self-host, extend, and integrate. |
@@ -332,7 +333,7 @@ If marketplace install is blocked by security scan, inspect the finding first. C
 - Docs: https://agent.notpunks.com/docs
 - Marketplace: https://skilzzz.com/
 - sNFT Protocol: https://snft.notpunks.com/
-- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.5
+- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.6
 - Ecosystem site: https://notpunks.com/
 
 ## License
