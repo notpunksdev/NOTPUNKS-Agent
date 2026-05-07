@@ -1593,7 +1593,29 @@ def _sha256_prefixed(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
-def _agent_build_hash() -> str:
+def _runtime_package_hash(package_dir: Path) -> str:
+    digest = hashlib.sha256()
+    files = []
+    for path in package_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        if path.name == "build-info.json":
+            continue
+        if path.suffix not in {".py", ".json", ".toml", ".txt", ".md"}:
+            continue
+        files.append(path)
+    for path in sorted(files):
+        rel = path.relative_to(package_dir).as_posix().encode("utf-8")
+        digest.update(rel)
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
+        digest.update(b"\n")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _agent_build_hash(info_path: Path | None = None) -> str:
     """Return the official runtime build hash when available.
 
     Release packaging can inject NOTPUNKS_AGENT_BUILD_HASH or ship a small
@@ -1604,11 +1626,17 @@ def _agent_build_hash() -> str:
     explicit = os.getenv("NOTPUNKS_AGENT_BUILD_HASH", "").strip()
     if explicit:
         return explicit
-    info_path = Path(__file__).with_name("build-info.json")
+    info_path = info_path or Path(__file__).with_name("build-info.json")
     if info_path.exists():
         try:
             payload = json.loads(info_path.read_text(encoding="utf-8"))
             build_hash = str(payload.get("build_hash") or payload.get("buildHash") or "").strip()
+            runtime_hash = str(payload.get("runtime_hash") or payload.get("runtimeHash") or "").strip()
+            if runtime_hash:
+                current_hash = _runtime_package_hash(info_path.parent)
+                if current_hash == runtime_hash:
+                    return runtime_hash
+                return "dev"
             if build_hash:
                 return build_hash
         except Exception:

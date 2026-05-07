@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import tarfile
@@ -102,6 +103,50 @@ Update an installed agent:
     )
 
 
+def runtime_package_hash(package_dir: Path) -> str:
+    digest = hashlib.sha256()
+    files = []
+    for path in package_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        if path.name == "build-info.json":
+            continue
+        if path.suffix not in {".py", ".json", ".toml", ".txt", ".md"}:
+            continue
+        files.append(path)
+    for path in sorted(files):
+        rel = path.relative_to(package_dir).as_posix().encode("utf-8")
+        digest.update(rel)
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
+        digest.update(b"\n")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def write_build_info(bundle_root: Path, tag: str, platform: str) -> str:
+    package_dir = bundle_root / "hermes_cli"
+    build_hash = runtime_package_hash(package_dir)
+    (package_dir / "build-info.json").write_text(
+        json.dumps(
+            {
+                "version": tag,
+                "platform": platform,
+                "build_hash": build_hash,
+                "runtime_hash": build_hash,
+                "hash_scope": "hermes_cli runtime source files",
+                "algorithm": "sha256(relative_path + file_sha256)",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return build_hash
+
+
 def stage_bundle(staging_dir: Path, bundle_root_name: str) -> Path:
     bundle_root = staging_dir / bundle_root_name
     if bundle_root.exists():
@@ -159,9 +204,11 @@ def main() -> None:
     ]
 
     built: list[Path] = []
+    build_hashes: list[tuple[str, str]] = []
     for platform, ext in artifacts:
         bundle_name = f"NOTPUNKS-Agent-{tag}-{platform}"
         bundle_root = stage_bundle(staging_dir, bundle_name)
+        build_hashes.append((platform, write_build_info(bundle_root, tag, platform)))
         out_path = out_dir / f"{bundle_name}.{ext}"
         if ext == "zip":
             make_zip(bundle_root, out_path)
@@ -175,6 +222,13 @@ def main() -> None:
         encoding="utf-8",
     )
     built.append(checksums)
+
+    build_hashes_path = out_dir / "build-hashes.txt"
+    build_hashes_path.write_text(
+        "".join(f"{build_hash}  {platform}\n" for platform, build_hash in build_hashes),
+        encoding="utf-8",
+    )
+    built.append(build_hashes_path)
 
     shutil.rmtree(staging_dir, ignore_errors=True)
 

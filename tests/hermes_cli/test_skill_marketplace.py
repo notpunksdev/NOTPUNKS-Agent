@@ -3,6 +3,7 @@ import base64
 import hashlib
 
 from hermes_cli.skill_marketplace import (
+    _agent_build_hash,
     build_listing,
     bundles_dir,
     backfill_sales_from_mint_intents,
@@ -21,6 +22,7 @@ from hermes_cli.skill_marketplace import (
     _snft_solana_message,
     _snft_agent_unlock_headers,
     _snft_unlock_endpoint,
+    _runtime_package_hash,
     publish_proof_payload,
     publish_listing_remote,
     nft_metadata_dir,
@@ -131,6 +133,38 @@ def test_snft_agent_unlock_headers_include_build_hash(monkeypatch):
     assert headers["X-NOTPUNKS-Agent-Build-Hash"] == "sha256:official-build"
     assert headers["X-NOTPUNKS-Agent-Timestamp"] == "1234567890"
     assert headers["X-NOTPUNKS-Agent-Attestation"].startswith("sha256=")
+
+
+def test_runtime_package_hash_changes_when_runtime_file_changes(tmp_path):
+    package_dir = tmp_path / "hermes_cli"
+    package_dir.mkdir()
+    runtime_file = package_dir / "skill_marketplace.py"
+    runtime_file.write_text("print('official')\n", encoding="utf-8")
+
+    first_hash = _runtime_package_hash(package_dir)
+    runtime_file.write_text("print('modified')\n", encoding="utf-8")
+
+    assert _runtime_package_hash(package_dir) != first_hash
+
+
+def test_agent_build_hash_verifies_runtime_hash_from_build_info(tmp_path, monkeypatch):
+    monkeypatch.delenv("NOTPUNKS_AGENT_BUILD_HASH", raising=False)
+    package_dir = tmp_path / "hermes_cli"
+    package_dir.mkdir()
+    runtime_file = package_dir / "skill_marketplace.py"
+    runtime_file.write_text("print('official')\n", encoding="utf-8")
+    runtime_hash = _runtime_package_hash(package_dir)
+    info_path = package_dir / "build-info.json"
+    info_path.write_text(
+        '{"build_hash": "%s", "runtime_hash": "%s"}\n' % (runtime_hash, runtime_hash),
+        encoding="utf-8",
+    )
+
+    assert _agent_build_hash(info_path) == runtime_hash
+
+    runtime_file.write_text("print('modified')\n", encoding="utf-8")
+
+    assert _agent_build_hash(info_path) == "dev"
 
 
 def test_check_skill_access_accepts_holder_and_license():

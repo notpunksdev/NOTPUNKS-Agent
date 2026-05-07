@@ -58,10 +58,11 @@ irm https://agent.notpunks.com/install.ps1 | iex
 Prefer fixed release archives instead of a remote installer:
 
 ```text
-Linux x64:   https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.3/NOTPUNKS-Agent-0.11.3-linux-x64.tar.gz
-macOS ARM64: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.3/NOTPUNKS-Agent-0.11.3-macos-arm64.tar.gz
-Windows WSL: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.3/NOTPUNKS-Agent-0.11.3-windows-wsl.zip
-Checksums:   https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.3/checksums.txt
+Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.4/NOTPUNKS-Agent-0.11.4-linux-x64.tar.gz
+macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.4/NOTPUNKS-Agent-0.11.4-macos-arm64.tar.gz
+Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.4/NOTPUNKS-Agent-0.11.4-windows-wsl.zip
+Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.4/checksums.txt
+Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.4/build-hashes.txt
 ```
 
 Start the agent:
@@ -331,7 +332,7 @@ If marketplace install is blocked by security scan, inspect the finding first. C
 - Docs: https://agent.notpunks.com/docs
 - Marketplace: https://skilzzz.com/
 - sNFT Protocol: https://snft.notpunks.com/
-- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.3
+- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.4
 - Ecosystem site: https://notpunks.com/
 
 ## License
