@@ -389,6 +389,7 @@ def test_install_marketplace_skill_downloads_verifies_and_installs(tmp_path, mon
 
 def test_install_marketplace_skill_prefers_encrypted_snft_cartridge(tmp_path, monkeypatch):
     import tools.skills_hub as hub
+    import tools.skills_tool as skills_tool
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
@@ -402,6 +403,7 @@ def test_install_marketplace_skill_prefers_encrypted_snft_cartridge(tmp_path, mo
     monkeypatch.setattr(hub, "AUDIT_LOG", hub_dir / "audit.log")
     monkeypatch.setattr(hub, "TAPS_FILE", hub_dir / "taps.json")
     monkeypatch.setattr(hub, "INDEX_CACHE_DIR", hub_dir / "index-cache")
+    monkeypatch.setattr(skills_tool, "SKILLS_DIR", skills_dir)
 
     source_dir = tmp_path / "source" / "alpha"
     source_dir.mkdir(parents=True)
@@ -468,7 +470,8 @@ def test_install_marketplace_skill_prefers_encrypted_snft_cartridge(tmp_path, mo
 
     def fake_post(url, json=None, headers=None, timeout=60):
         assert url.endswith("/alpha/unlock")
-        assert headers == {"X-NOTPUNKS-Publish-Token": "unlock-token"}
+        assert headers["X-NOTPUNKS-Publish-Token"] == "unlock-token"
+        assert headers["X-NOTPUNKS-Agent-Version"]
         return _Response({"success": True, "data": {
             "encryption": "aes-256-gcm",
             "key": base64.b64encode(key).decode(),
@@ -484,9 +487,18 @@ def test_install_marketplace_skill_prefers_encrypted_snft_cartridge(tmp_path, mo
     result = install_marketplace_skill("alpha")
 
     assert result["name"] == "alpha"
-    assert result["source_kind"] == "snft"
+    assert result["source_kind"] == "snft_encrypted_runtime"
     assert result["bundle_hash"] == plaintext_hash
     assert (skills_dir / "alpha" / "SKILL.md").exists()
+    assert "# Alpha" not in (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8")
+    assert (skills_dir / "alpha" / ".notpunks-snft" / "cartridge.enc").exists()
+    assert (skills_dir / "alpha" / ".notpunks-snft" / "manifest.json").exists()
+
+    from tools.skills_tool import skill_view
+
+    viewed = skill_view("alpha", preprocess=False)
+    assert '"success": true' in viewed
+    assert "# Alpha" in viewed
 
 
 def test_install_snft_from_metadata_url_installs_without_marketplace_listing(tmp_path, monkeypatch):
@@ -561,7 +573,8 @@ def test_install_snft_from_metadata_url_installs_without_marketplace_listing(tmp
 
     def fake_post(url, json=None, headers=None, timeout=60):
         assert url == "https://issuer.example/snft/alpha/unlock"
-        assert headers == {"X-NOTPUNKS-Publish-Token": "unlock-token"}
+        assert headers["X-NOTPUNKS-Publish-Token"] == "unlock-token"
+        assert headers["X-NOTPUNKS-Agent-Version"]
         return _Response({"success": True, "data": {
             "encryption": "aes-256-gcm",
             "key": base64.b64encode(key).decode(),
@@ -576,9 +589,11 @@ def test_install_snft_from_metadata_url_installs_without_marketplace_listing(tmp
     result = install_snft_from_metadata_url(metadata_url)
 
     assert result["name"] == "alpha"
-    assert result["source_kind"] == "snft"
+    assert result["source_kind"] == "snft_encrypted_runtime"
     assert result["bundle_hash"] == plaintext_hash
     assert (skills_dir / "alpha" / "SKILL.md").exists()
+    assert "# Alpha" not in (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8")
+    assert (skills_dir / "alpha" / ".notpunks-snft" / "cartridge.enc").exists()
 
 
 def test_install_snft_posts_normalized_ton_unlock_request(tmp_path, monkeypatch):
@@ -690,7 +705,7 @@ def test_install_snft_posts_normalized_ton_unlock_request(tmp_path, monkeypatch)
     result = install_snft_from_metadata_url("https://issuer.example/snft/alpha/metadata.json")
 
     assert result["name"] == "alpha"
-    assert seen["headers"] == {}
+    assert seen["headers"]["X-NOTPUNKS-Agent-Version"]
     assert seen["url"] == "https://issuer.example/snft/alpha/unlock"
     assert seen["json"]["walletProof"] == wallet_proof
     assert seen["json"]["unlockRequest"]["protocol"] == "snft"

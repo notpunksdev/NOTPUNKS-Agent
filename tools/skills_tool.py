@@ -1066,6 +1066,60 @@ def skill_view(
                 ensure_ascii=False,
             )
 
+        encrypted_runtime = skill_dir and (skill_dir / ".notpunks-snft" / "manifest.json").exists()
+        if encrypted_runtime:
+            try:
+                from hermes_cli.skill_marketplace import load_encrypted_snft_skill_file
+
+                unlocked = load_encrypted_snft_skill_file(skill_dir, file_path or "")
+            except Exception as e:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Encrypted sNFT skill unlock failed: {e}",
+                        "hint": "Make sure the connected wallet still owns the Skill NFT, then retry.",
+                    },
+                    ensure_ascii=False,
+                )
+            if not unlocked.get("ok"):
+                payload = {
+                    "success": False,
+                    "error": unlocked.get("error") or "Encrypted sNFT skill unlock failed",
+                    "hint": "Make sure the connected wallet still owns the Skill NFT, then retry.",
+                }
+                if unlocked.get("available_files"):
+                    payload["available_files"] = unlocked.get("available_files")
+                return json.dumps(payload, ensure_ascii=False)
+            content = str(unlocked.get("content") or "")
+            if unlocked.get("is_binary"):
+                return json.dumps(
+                    {
+                        "success": True,
+                        "name": name,
+                        "file": unlocked.get("file") or file_path or "SKILL.md",
+                        "content": content,
+                        "is_binary": True,
+                        "source_kind": "snft_encrypted_runtime",
+                    },
+                    ensure_ascii=False,
+                )
+            if file_path:
+                return json.dumps(
+                    {
+                        "success": True,
+                        "name": name,
+                        "file": unlocked.get("file") or file_path,
+                        "content": content,
+                        "file_type": Path(str(unlocked.get("file") or file_path)).suffix,
+                        "source_kind": "snft_encrypted_runtime",
+                    },
+                    ensure_ascii=False,
+                )
+            try:
+                parsed_frontmatter, _ = _parse_frontmatter(content)
+            except Exception:
+                parsed_frontmatter = {}
+
         # If a specific file path is requested, read that instead
         if file_path and skill_dir:
             from tools.path_security import validate_within_dir, has_traversal_component

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import hmac
 import io
 import tarfile
 import tempfile
@@ -661,7 +662,9 @@ def unpublish_listing_remote(
     token = marketplace_publish_token() if use_admin_token else ""
     if not token and not wallet_proof:
         raise RuntimeError("Remote unpublish requires a wallet signature or admin token.")
-    headers = {"X-NOTPUNKS-Publish-Token": token} if token else {}
+    headers = _snft_agent_unlock_headers(skill_id, encrypted_hash)
+    if token:
+        headers["X-NOTPUNKS-Publish-Token"] = token
     payload: dict[str, Any] = {"skillId": skill_id}
     if wallet_proof:
         payload["walletProof"] = wallet_proof
@@ -1545,6 +1548,32 @@ def _sha256_prefixed(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
+def _snft_agent_unlock_headers(skill_id: str, encrypted_hash: str = "") -> dict[str, str]:
+    """Return optional official-runtime attestation headers for sNFT unlock.
+
+    This is a Pro/runtime foundation: production signed builds can inject
+    NOTPUNKS_AGENT_ATTESTATION_SECRET. Open-source/dev agents omit it and use
+    the normal wallet proof path unless the server explicitly requires
+    attestation.
+    """
+    try:
+        from hermes_cli import __version__ as agent_version
+    except Exception:
+        agent_version = "unknown"
+    headers = {"X-NOTPUNKS-Agent-Version": str(agent_version)}
+    secret = os.getenv("NOTPUNKS_AGENT_ATTESTATION_SECRET", "").strip()
+    if not secret:
+        return headers
+    timestamp = str(int(time.time()))
+    payload = f"snft-agent-unlock:{skill_id}:{encrypted_hash}:{agent_version}:{timestamp}"
+    signature = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    headers.update({
+        "X-NOTPUNKS-Agent-Timestamp": timestamp,
+        "X-NOTPUNKS-Agent-Attestation": f"sha256={signature}",
+    })
+    return headers
+
+
 def _decrypt_snft_cartridge(encrypted_payload: bytes, unlock_data: dict[str, Any]) -> bytes:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -1559,6 +1588,177 @@ def _decrypt_snft_cartridge(encrypted_payload: bytes, unlock_data: dict[str, Any
     if len(nonce) != 12:
         raise ValueError("Invalid sNFT nonce length")
     return AESGCM(key).decrypt(nonce, encrypted_payload, aad)
+
+
+def _safe_yaml_scalar(value: Any) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _snft_runtime_dir(skill_dir: Path) -> Path:
+    return skill_dir / ".notpunks-snft"
+
+
+def _install_encrypted_snft_from_marketplace(
+    *,
+    skill_id: str,
+    listing: dict[str, Any],
+    category: str,
+    encrypted_payload: bytes,
+    metadata: dict[str, Any],
+    metadata_url: str,
+    unlock_url: str,
+    unlock_request: dict[str, Any] | None,
+    plaintext_hash: str,
+    encrypted_hash: str,
+    scan_verdict: str,
+) -> dict[str, Any]:
+    import shutil
+    from tools.skills_hub import HubLockFile, SKILLS_DIR, content_hash
+
+    safe_skill_id = _slug(skill_id)
+    safe_category = _slug(category) if category else ""
+    install_dir = SKILLS_DIR / safe_category / safe_skill_id if safe_category else SKILLS_DIR / safe_skill_id
+    if install_dir.exists():
+        shutil.rmtree(install_dir)
+    runtime_dir = _snft_runtime_dir(install_dir)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+
+    description = (
+        metadata.get("description")
+        or listing.get("description")
+        or "Encrypted Skill NFT cartridge. Runtime unlock requires current NFT ownership."
+    )
+    name = metadata.get("name") or listing.get("name") or safe_skill_id
+    stub = (
+        "---\n"
+        f"name: {_safe_yaml_scalar(safe_skill_id)}\n"
+        f"description: {_safe_yaml_scalar(description)}\n"
+        "metadata:\n"
+        "  notpunks:\n"
+        "    source: skilzzz\n"
+        "    snft_runtime: encrypted\n"
+        f"    skill_id: {_safe_yaml_scalar(safe_skill_id)}\n"
+        "---\n\n"
+        "# Encrypted Skill NFT cartridge\n\n"
+        "This skill is stored as an encrypted sNFT cartridge. NOTPUNKS Agent unlocks it at runtime only after the connected wallet proves current NFT ownership.\n"
+    )
+    (install_dir / "SKILL.md").write_text(stub, encoding="utf-8")
+    (runtime_dir / "cartridge.enc").write_bytes(encrypted_payload)
+    manifest = {
+        "protocol": "snft",
+        "version": "1.0",
+        "source_kind": "snft_encrypted_runtime",
+        "skill_id": safe_skill_id,
+        "name": name,
+        "description": description,
+        "metadata_url": metadata_url,
+        "unlock_url": unlock_url,
+        "encrypted_sha256": encrypted_hash,
+        "plaintext_sha256": plaintext_hash,
+        "listing": listing,
+        "snft": _snft_descriptor(metadata),
+        "unlock_request": unlock_request or {},
+    }
+    (runtime_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    rel_install_path = str(install_dir.relative_to(SKILLS_DIR))
+    HubLockFile().record_install(
+        name=safe_skill_id,
+        source="notpunks-marketplace",
+        identifier=f"notpunks-marketplace/{safe_skill_id}",
+        trust_level="community",
+        scan_verdict=scan_verdict,
+        skill_hash=content_hash(install_dir),
+        install_path=rel_install_path,
+        files=["SKILL.md", ".notpunks-snft/cartridge.enc", ".notpunks-snft/manifest.json"],
+        metadata={
+            "marketplace": "app.notpunks.com",
+            "bundle_hash": plaintext_hash,
+            "listing_bundle_hash": listing.get("bundleHash", ""),
+            "nft_metadata_url": metadata_url,
+            "price_ton": listing.get("priceTon", 0),
+            "creator_wallet": listing.get("creatorWallet", ""),
+            "source_kind": "snft_encrypted_runtime",
+            "encrypted_sha256": encrypted_hash,
+            "plaintext_sha256": plaintext_hash,
+            "runtime_gated": True,
+        },
+    )
+    return {
+        "name": safe_skill_id,
+        "path": rel_install_path,
+        "bundle_hash": plaintext_hash,
+        "scan_verdict": scan_verdict,
+        "source_kind": "snft_encrypted_runtime",
+    }
+
+
+def load_encrypted_snft_skill_file(skill_dir: Path, file_path: str = "") -> dict[str, Any]:
+    """Unlock an installed encrypted sNFT cartridge and read one file in memory."""
+    import httpx
+    from tools.path_security import has_traversal_component, validate_within_dir
+
+    runtime_dir = _snft_runtime_dir(skill_dir)
+    manifest_path = runtime_dir / "manifest.json"
+    cartridge_path = runtime_dir / "cartridge.enc"
+    if not manifest_path.exists() or not cartridge_path.exists():
+        return {"ok": False, "error": "Encrypted sNFT runtime files are missing"}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    skill_id = _slug(str(manifest.get("skill_id") or skill_dir.name))
+    encrypted_payload = cartridge_path.read_bytes()
+    encrypted_hash = str(manifest.get("encrypted_sha256") or "")
+    if encrypted_hash and _sha256_prefixed(encrypted_payload) != encrypted_hash:
+        return {"ok": False, "error": "Encrypted sNFT cartridge hash mismatch"}
+
+    unlock_url = str(manifest.get("unlock_url") or "")
+    if not unlock_url:
+        return {"ok": False, "error": "Encrypted sNFT unlock endpoint is missing"}
+    token = marketplace_unlock_token()
+    headers = _snft_agent_unlock_headers(skill_id, encrypted_hash)
+    if token:
+        headers["X-NOTPUNKS-Publish-Token"] = token
+    unlock_request = manifest.get("unlock_request") if isinstance(manifest.get("unlock_request"), dict) else {}
+    payload: dict[str, Any] = {"skillId": skill_id}
+    if unlock_request:
+        payload.update(unlock_request)
+        payload["unlockRequest"] = unlock_request
+    response = httpx.post(unlock_url, json=payload, headers=headers, timeout=60)
+    response.raise_for_status()
+    data = response.json()
+    if not data.get("success"):
+        return {"ok": False, "error": data.get("error") or "sNFT cartridge unlock failed"}
+    unlock_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+    decrypted = _decrypt_snft_cartridge(encrypted_payload, unlock_data)
+    plaintext_hash = str(unlock_data.get("plaintextSha256") or manifest.get("plaintext_sha256") or "")
+    if plaintext_hash and _sha256_prefixed(decrypted) != plaintext_hash:
+        return {"ok": False, "error": "sNFT plaintext hash mismatch"}
+
+    with tempfile.TemporaryDirectory(prefix="notpunks-snft-runtime-") as tmp:
+        skill_root = _safe_extract_tar_bytes(decrypted, Path(tmp))
+        rel_file = file_path or "SKILL.md"
+        if has_traversal_component(rel_file):
+            return {"ok": False, "error": "Path traversal ('..') is not allowed"}
+        target = skill_root / rel_file
+        traversal_error = validate_within_dir(target, skill_root)
+        if traversal_error:
+            return {"ok": False, "error": traversal_error}
+        if not target.exists() or not target.is_file():
+            available = sorted(
+                str(path.relative_to(skill_root).as_posix())
+                for path in _iter_skill_files(skill_root)
+            )
+            return {"ok": False, "error": f"File '{rel_file}' not found in encrypted sNFT skill", "available_files": available}
+        try:
+            content = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return {
+                "ok": True,
+                "content": f"[Binary file: {target.name}, size: {target.stat().st_size} bytes]",
+                "is_binary": True,
+                "file": rel_file,
+            }
+        return {"ok": True, "content": content, "file": rel_file, "is_binary": False}
 
 
 def _install_skill_root_from_marketplace(
@@ -1648,7 +1848,9 @@ def _install_snft_marketplace_skill(
         )
 
     token = marketplace_unlock_token()
-    headers = {"X-NOTPUNKS-Publish-Token": token} if token else {}
+    headers = _snft_agent_unlock_headers(skill_id, encrypted_hash)
+    if token:
+        headers["X-NOTPUNKS-Publish-Token"] = token
     wallet_proof = None
     unlock_request = None
     if not token:
@@ -1716,6 +1918,8 @@ def _install_snft_marketplace_skill(
         )
 
     with tempfile.TemporaryDirectory(prefix="notpunks-snft-marketplace-") as tmp:
+        from tools.skills_guard import scan_skill, should_allow_install, format_scan_report
+
         tmp_path = Path(tmp)
         skill_root = _safe_extract_tar_bytes(decrypted, tmp_path)
         expected_bundle_hash = str(listing.get("bundleHash") or "")
@@ -1725,14 +1929,22 @@ def _install_snft_marketplace_skill(
                 raise ValueError(
                     f"Bundle hash mismatch for {skill_id}: expected {expected_bundle_hash}, got {manifest['bundle_hash']}"
                 )
-        return _install_skill_root_from_marketplace(
-            skill_root=skill_root,
+        scan_result = scan_skill(skill_root, source=f"notpunks-marketplace/{skill_id}")
+        allowed, reason = should_allow_install(scan_result, force=force)
+        if not allowed:
+            raise ValueError(f"Security scan blocked install ({reason}):\n{format_scan_report(scan_result)}")
+        return _install_encrypted_snft_from_marketplace(
             skill_id=skill_id,
-            expected_hash=plaintext_hash or expected_bundle_hash or encrypted_hash,
             listing=listing,
             category=category,
-            force=force,
-            source_kind="snft",
+            encrypted_payload=encrypted_payload,
+            metadata=metadata,
+            metadata_url=metadata_url,
+            unlock_url=unlock_url,
+            unlock_request=unlock_request,
+            plaintext_hash=plaintext_hash or expected_bundle_hash,
+            encrypted_hash=encrypted_hash,
+            scan_verdict=scan_result.verdict,
         )
 
 
@@ -1855,8 +2067,11 @@ def list_installed_marketplace_skills(name: str = "") -> list[dict[str, Any]]:
         skill_dir = (SKILLS_DIR / install_path).resolve() if install_path else None
         recorded_hash = str(metadata.get("bundle_hash") or "")
         listing_hash = str(metadata.get("listing_bundle_hash") or "")
+        source_kind = str(metadata.get("source_kind") or "")
         expected_manifest_hash = listing_hash
-        if not expected_manifest_hash and str(metadata.get("source_kind") or "") != "snft":
+        if source_kind in {"snft", "snft_encrypted_runtime"}:
+            expected_manifest_hash = ""
+        if not expected_manifest_hash and source_kind not in {"snft", "snft_encrypted_runtime"}:
             expected_manifest_hash = recorded_hash
 
         current_hash = ""
@@ -1864,7 +2079,15 @@ def list_installed_marketplace_skills(name: str = "") -> list[dict[str, Any]]:
         if skill_dir and skill_dir.exists() and (skill_dir / "SKILL.md").exists():
             local_status = "installed"
             try:
-                current_hash = build_skill_bundle_manifest(skill_dir, skill_id)["bundle_hash"]
+                if source_kind == "snft_encrypted_runtime":
+                    runtime_manifest = _snft_runtime_dir(skill_dir) / "manifest.json"
+                    runtime_cartridge = _snft_runtime_dir(skill_dir) / "cartridge.enc"
+                    if not runtime_manifest.exists() or not runtime_cartridge.exists():
+                        local_status = "missing"
+                    else:
+                        current_hash = recorded_hash
+                else:
+                    current_hash = build_skill_bundle_manifest(skill_dir, skill_id)["bundle_hash"]
                 if expected_manifest_hash and current_hash != expected_manifest_hash:
                     local_status = "modified"
             except Exception:
@@ -1881,7 +2104,7 @@ def list_installed_marketplace_skills(name: str = "") -> list[dict[str, Any]]:
             "currentBundleHash": current_hash,
             "scanVerdict": str(entry.get("scan_verdict") or ""),
             "source": source,
-            "sourceKind": str(metadata.get("source_kind") or ""),
+            "sourceKind": source_kind,
             "identifier": identifier,
             "installedAt": str(entry.get("installed_at") or ""),
             "updatedAt": str(entry.get("updated_at") or ""),
