@@ -35,6 +35,7 @@ dependencies = [
   # Skills Hub (GitHub App JWT auth — optional, only needed for bot identity)
   "PyJWT[crypto]>=2.12.0,<3",  # CVE-2026-32597
   "cryptography>=42.0.0,<48",
+  "notpunks-snft-sdk @ git+https://github.com/notpunksdev/snft-python-sdk.git@v0.1.1",
   # TON Wallet + NFT Access (TON Connect protocol)
   "pytonconnect>=0.3.2,<0.4",
   "pytoniq>=0.1.43,<0.2",

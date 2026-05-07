@@ -900,6 +900,13 @@ def _snft_unlock_challenge(snft: dict[str, Any], chain: dict[str, Any]) -> str:
     unlock = snft.get("unlock") if isinstance(snft.get("unlock"), dict) else {}
     challenge = str(proof.get("challenge") or unlock.get("challenge") or "")
     if not challenge:
+        try:
+            from snft_sdk import build_unlock_challenge
+
+            challenge = build_unlock_challenge(snft)
+        except Exception:
+            challenge = ""
+    if not challenge:
         raise RuntimeError("sNFT unlock challenge is missing from metadata")
     return challenge
 
@@ -955,33 +962,39 @@ def _build_snft_ton_unlock_request(
     chain: dict[str, Any],
     wallet_proof: dict[str, Any],
 ) -> dict[str, Any]:
-    proof = chain.get("proof") if isinstance(chain.get("proof"), dict) else {}
     wallet_address = str(wallet_proof.get("walletAddress") or "")
-    nft: dict[str, Any] = {}
-    for source_key, out_key in (
-        ("item_address", "item_address"),
-        ("collection_address", "collection_address"),
-        ("itemIndex", "item_index"),
-        ("item_index", "item_index"),
-    ):
-        value = proof.get(source_key)
-        if value:
-            nft[out_key] = value
-    return {
-        "protocol": "snft",
-        "version": str(snft.get("version") or "1.0"),
-        "skill_id": skill_id,
-        "chain": "ton",
+    proof_payload = {
+        "method": "ton_proof",
         "wallet": wallet_address,
-        "challenge": _snft_unlock_challenge(snft, chain),
-        "nft": nft,
-        "proof": {
-            "method": "ton_proof",
-            "wallet": wallet_address,
-            "ton_proof": wallet_proof,
-            "payload": wallet_proof,
-        },
+        "ton_proof": wallet_proof,
+        "payload": wallet_proof,
     }
+    try:
+        from snft_sdk import create_chain_unlock_request
+
+        return create_chain_unlock_request(snft, chain, wallet_address, proof_payload)
+    except Exception:
+        proof = chain.get("proof") if isinstance(chain.get("proof"), dict) else {}
+        nft: dict[str, Any] = {}
+        for source_key, out_key in (
+            ("item_address", "item_address"),
+            ("collection_address", "collection_address"),
+            ("itemIndex", "item_index"),
+            ("item_index", "item_index"),
+        ):
+            value = proof.get(source_key)
+            if value:
+                nft[out_key] = value
+        return {
+            "protocol": "snft",
+            "version": str(snft.get("version") or "1.0"),
+            "skill_id": skill_id,
+            "chain": "ton",
+            "wallet": wallet_address,
+            "challenge": _snft_unlock_challenge(snft, chain),
+            "nft": nft,
+            "proof": proof_payload,
+        }
 
 
 def _snft_evm_nft_reference(chain: dict[str, Any]) -> dict[str, Any]:
@@ -1671,13 +1684,25 @@ def _snft_agent_unlock_headers(skill_id: str, encrypted_hash: str = "") -> dict[
     secret = os.getenv("NOTPUNKS_AGENT_ATTESTATION_SECRET", "").strip()
     if not secret:
         return headers
-    timestamp = str(int(time.time()))
-    payload = f"snft-agent-unlock:{skill_id}:{encrypted_hash}:{agent_version}:{build_hash}:{timestamp}"
-    signature = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    headers.update({
-        "X-NOTPUNKS-Agent-Timestamp": timestamp,
-        "X-NOTPUNKS-Agent-Attestation": f"sha256={signature}",
-    })
+    try:
+        from snft_sdk import create_runtime_attestation_headers
+
+        headers.update(create_runtime_attestation_headers(
+            skill_id=skill_id,
+            encrypted_sha256=encrypted_hash,
+            agent_version=str(agent_version),
+            build_hash=build_hash,
+            attestation_secret=secret,
+            timestamp=str(int(time.time())),
+        ))
+    except Exception:
+        timestamp = str(int(time.time()))
+        payload = f"snft-agent-unlock:{skill_id}:{encrypted_hash}:{agent_version}:{build_hash}:{timestamp}"
+        signature = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        headers.update({
+            "X-NOTPUNKS-Agent-Timestamp": timestamp,
+            "X-NOTPUNKS-Agent-Attestation": f"sha256={signature}",
+        })
     return headers
 
 
