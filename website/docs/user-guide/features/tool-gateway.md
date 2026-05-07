@@ -11,7 +11,7 @@ sidebar_position: 2
 The Tool Gateway is included with paid Nous Portal subscriptions. **[Manage your subscription →](https://portal.nousresearch.com/manage-subscription)**
 :::
 
-The **Tool Gateway** lets paid [Nous Portal](https://portal.nousresearch.com) subscribers use web search, image generation, text-to-speech, and browser automation through their existing subscription — no need to sign up for separate API keys from Firecrawl, FAL, OpenAI, or Browser Use.
+The **Tool Gateway** lets paid [Nous Portal](https://portal.nousresearch.com) subscribers use web search, image generation, text-to-speech, and browser automation through their existing subscription — no need to sign up for separate tool API keys where gateway support is available.
 
 ## What's Included
 
@@ -20,7 +20,7 @@ The **Tool Gateway** lets paid [Nous Portal](https://portal.nousresearch.com) su
 | **Web search & extract** | Search the web and extract page content via Firecrawl | `FIRECRAWL_API_KEY`, `EXA_API_KEY`, `PARALLEL_API_KEY`, `TAVILY_API_KEY` |
 | **Image generation** | Generate images via FAL (8 models: FLUX 2 Klein/Pro, GPT-Image, Nano Banana Pro, Ideogram, Recraft V4 Pro, Qwen, Z-Image) | `FAL_KEY` |
 | **Text-to-speech** | Convert text to speech via OpenAI TTS | `VOICE_TOOLS_OPENAI_KEY`, `ELEVENLABS_API_KEY` |
-| **Browser automation** | Control cloud browsers via Browser Use | `BROWSER_USE_API_KEY`, `BROWSERBASE_API_KEY` |
+| **Browser automation** | Control supported cloud browser providers | `BROWSERBASE_API_KEY` |
 
 All four tools bill to your Nous subscription. You can enable any combination — for example, use the gateway for web and image generation while keeping your own ElevenLabs key for TTS.
 
@@ -52,7 +52,7 @@ Your Nous subscription includes the Tool Gateway.
   ○ Web search & extract (Firecrawl) — not configured
   ○ Image generation (FAL) — not configured
   ○ Text-to-speech (OpenAI TTS) — not configured
-  ○ Browser automation (Browser Use) — not configured
+  ○ Browser automation — not configured
 
   ● Enable Tool Gateway
   ○ Skip
@@ -100,7 +100,7 @@ When `use_gateway: true` is set for a tool, the runtime routes API calls through
 1. **Web tools** — `web_search` and `web_extract` use the gateway's Firecrawl endpoint
 2. **Image generation** — `image_generate` uses the gateway's FAL endpoint
 3. **TTS** — `text_to_speech` uses the gateway's OpenAI Audio endpoint
-4. **Browser** — `browser_navigate` and other browser tools use the gateway's Browser Use endpoint
+4. **Browser** — `browser_navigate` and other browser tools use a configured browser provider
 
 The gateway authenticates using your Nous Portal credentials (stored in `~/.hermes/auth.json` after `hermes model`).
 
@@ -145,7 +145,7 @@ The **Nous Tool Gateway** section shows:
   Web tools       ✓ active via Nous subscription
   Image gen       ✓ active via Nous subscription
   TTS             ✓ active via Nous subscription
-  Browser         ○ active via Browser Use key
+  Browser         ○ active via configured browser key
   Modal           ○ available via subscription (optional)
 ```
 

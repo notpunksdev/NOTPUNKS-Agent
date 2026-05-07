@@ -1,12 +1,12 @@
 ---
 sidebar_position: 4
 title: "Memory Providers"
-description: "External memory provider plugins — Honcho, OpenViking, Mem0, Hindsight, Holographic, RetainDB, ByteRover, Supermemory"
+description: "External memory provider plugins — shipped Honcho/Mem0 paths plus experimental/community provider notes"
 ---
 
 # Memory Providers
 
-NOTPUNKS Agent ships with 8 external memory provider plugins that give the agent persistent, cross-session knowledge beyond the built-in MEMORY.md and USER.md. Only **one** external provider can be active at a time — the built-in memory is always active alongside it.
+NOTPUNKS Agent supports external memory providers that give the agent persistent, cross-session knowledge beyond the built-in MEMORY.md and USER.md. Honcho and Mem0 are the primary shipped provider paths. Other provider sections on this page are experimental/community integration notes and may require enabling extra code or plugins in your build. Only **one** external provider can be active at a time — the built-in memory is always active alongside it.
 
 ## Quick Start
 

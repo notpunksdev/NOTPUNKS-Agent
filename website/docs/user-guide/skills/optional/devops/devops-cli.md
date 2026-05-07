@@ -39,7 +39,7 @@ All commands use the **terminal tool** to run `infsh` commands.
 - User asks to generate video (Veo, Wan, Seedance, OmniHuman)
 - User asks about inference.sh or infsh
 - User wants to run AI apps without managing individual provider APIs
-- User asks for AI-powered search (Tavily, Exa)
+- User asks for AI-powered search through supported search apps
 - User needs avatar/lipsync generation
 
 ## Prerequisites

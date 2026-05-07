@@ -22,20 +22,19 @@ NOTPUNKS supports multiple AI inference providers out of the box. Use `hermes mo
 
 ## Web Search Backends
 
-The `web_search` and `web_extract` tools support four backend providers, configured via `config.yaml` or `hermes tools`:
+The `web_search` and `web_extract` tools support the shipped backend providers below, configured via `config.yaml` or `hermes tools`:
 
 | Backend | Env Var | Search | Extract | Crawl |
 |---------|---------|--------|---------|-------|
 | **Firecrawl** (default) | `FIRECRAWL_API_KEY` | ✔ | ✔ | ✔ |
 | **Parallel** | `PARALLEL_API_KEY` | ✔ | ✔ | — |
-| **Tavily** | `TAVILY_API_KEY` | ✔ | ✔ | ✔ |
 | **Exa** | `EXA_API_KEY` | ✔ | ✔ | — |
 
 Quick setup example:
 
 ```yaml
 web:
-  backend: firecrawl    # firecrawl | parallel | tavily | exa
+  backend: firecrawl    # firecrawl | parallel | exa
 ```
 
 If `web.backend` is not set, the backend is auto-detected from whichever API key is available. Self-hosted Firecrawl is also supported via `FIRECRAWL_API_URL`.
@@ -45,7 +44,7 @@ If `web.backend` is not set, the backend is auto-detected from whichever API key
 NOTPUNKS includes full browser automation with multiple backend options for navigating websites, filling forms, and extracting information:
 
 - **Browserbase** — Managed cloud browsers with anti-bot tooling, CAPTCHA solving, and residential proxies
-- **Browser Use** — Alternative cloud browser provider
+- **Camofox** — Local anti-detection browser mode
 - **Local Chrome via CDP** — Connect to your running Chrome instance using `/browser connect`
 - **Local Chromium** — Headless local browser via the `agent-browser` CLI
 
@@ -76,7 +75,7 @@ Speech-to-text supports three providers: local Whisper (free, runs on-device), G
 ## Memory & Personalization
 
 - **[Built-in Memory](/docs/user-guide/features/memory)** — Persistent, curated memory via `MEMORY.md` and `USER.md` files. The agent maintains bounded stores of personal notes and user profile data that survive across sessions.
-- **[Memory Providers](/docs/user-guide/features/memory-providers)** — Plug in external memory backends for deeper personalization. Seven providers are supported: Honcho (dialectic reasoning), OpenViking (tiered retrieval), Mem0 (cloud extraction), Hindsight (knowledge graphs), Holographic (local SQLite), RetainDB (hybrid search), and ByteRover (CLI-based).
+- **[Memory Providers](/docs/user-guide/features/memory-providers)** — Plug in external memory backends for deeper personalization. Honcho and Mem0 are the primary shipped provider paths; additional provider pages are experimental/community integration notes unless enabled in your build.
 
 ## Messaging Platforms
 

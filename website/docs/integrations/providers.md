@@ -1126,7 +1126,7 @@ You can switch between providers at any time with `hermes model` — no restart 
 | Mistral TTS + voice transcription | [Mistral](https://console.mistral.ai/) | `MISTRAL_API_KEY` |
 | RL Training | [Tinker](https://tinker-console.thinkingmachines.ai/) + [WandB](https://wandb.ai/) | `TINKER_API_KEY`, `WANDB_API_KEY` |
 | Cross-session user modeling | [Honcho](https://honcho.dev/) | `HONCHO_API_KEY` |
-| Semantic long-term memory | [Supermemory](https://supermemory.ai) | `SUPERMEMORY_API_KEY` |
+| Cross-session memory | [Honcho](https://honcho.dev/) / Mem0 | `HONCHO_API_KEY` / Mem0 config |
 
 ### Self-Hosting Firecrawl
 
