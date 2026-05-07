@@ -17,6 +17,7 @@ import tempfile
 import time
 import base64
 import os
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -1592,6 +1593,36 @@ def _sha256_prefixed(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
 
 
+def _agent_build_hash() -> str:
+    """Return the official runtime build hash when available.
+
+    Release packaging can inject NOTPUNKS_AGENT_BUILD_HASH or ship a small
+    hermes_cli/build-info.json file. Source/dev installs deliberately fall back
+    to "dev"; production unlock services can reject that value through their
+    allowlist.
+    """
+    explicit = os.getenv("NOTPUNKS_AGENT_BUILD_HASH", "").strip()
+    if explicit:
+        return explicit
+    info_path = Path(__file__).with_name("build-info.json")
+    if info_path.exists():
+        try:
+            payload = json.loads(info_path.read_text(encoding="utf-8"))
+            build_hash = str(payload.get("build_hash") or payload.get("buildHash") or "").strip()
+            if build_hash:
+                return build_hash
+        except Exception:
+            pass
+    if os.getenv("NOTPUNKS_AGENT_HASH_EXECUTABLE", "").strip() == "1":
+        try:
+            exe = Path(sys.executable)
+            if exe.is_file():
+                return _sha256_prefixed(exe.read_bytes())
+        except Exception:
+            pass
+    return "dev"
+
+
 def _snft_agent_unlock_headers(skill_id: str, encrypted_hash: str = "") -> dict[str, str]:
     """Return optional official-runtime attestation headers for sNFT unlock.
 
@@ -1604,12 +1635,16 @@ def _snft_agent_unlock_headers(skill_id: str, encrypted_hash: str = "") -> dict[
         from hermes_cli import __version__ as agent_version
     except Exception:
         agent_version = "unknown"
-    headers = {"X-NOTPUNKS-Agent-Version": str(agent_version)}
+    build_hash = _agent_build_hash()
+    headers = {
+        "X-NOTPUNKS-Agent-Version": str(agent_version),
+        "X-NOTPUNKS-Agent-Build-Hash": build_hash,
+    }
     secret = os.getenv("NOTPUNKS_AGENT_ATTESTATION_SECRET", "").strip()
     if not secret:
         return headers
     timestamp = str(int(time.time()))
-    payload = f"snft-agent-unlock:{skill_id}:{encrypted_hash}:{agent_version}:{timestamp}"
+    payload = f"snft-agent-unlock:{skill_id}:{encrypted_hash}:{agent_version}:{build_hash}:{timestamp}"
     signature = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     headers.update({
         "X-NOTPUNKS-Agent-Timestamp": timestamp,

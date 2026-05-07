@@ -19,6 +19,7 @@ from hermes_cli.skill_marketplace import (
     _snft_browser_signer_config,
     _snft_evm_typed_data,
     _snft_solana_message,
+    _snft_agent_unlock_headers,
     _snft_unlock_endpoint,
     publish_proof_payload,
     publish_listing_remote,
@@ -117,6 +118,19 @@ def test_snft_unlock_endpoint_can_use_registry_url(monkeypatch):
 
     assert _snft_unlock_endpoint(snft, "https://issuer.example/snft/alpha/metadata.json") == "https://issuer.example/snft/alpha/unlock"
     assert seen["url"] == "https://issuer.example/snft/alpha/unlock-networks/notpunks-mainnet-1"
+
+
+def test_snft_agent_unlock_headers_include_build_hash(monkeypatch):
+    monkeypatch.setenv("NOTPUNKS_AGENT_BUILD_HASH", "sha256:official-build")
+    monkeypatch.setenv("NOTPUNKS_AGENT_ATTESTATION_SECRET", "secret")
+    monkeypatch.setattr("time.time", lambda: 1234567890)
+
+    headers = _snft_agent_unlock_headers("alpha", "sha256:encrypted")
+
+    assert headers["X-NOTPUNKS-Agent-Version"]
+    assert headers["X-NOTPUNKS-Agent-Build-Hash"] == "sha256:official-build"
+    assert headers["X-NOTPUNKS-Agent-Timestamp"] == "1234567890"
+    assert headers["X-NOTPUNKS-Agent-Attestation"].startswith("sha256=")
 
 
 def test_check_skill_access_accepts_holder_and_license():
