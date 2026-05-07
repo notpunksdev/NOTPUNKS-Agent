@@ -197,11 +197,21 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 def _local_wallet_summary() -> dict[str, Any]:
     try:
-        from agent.wallet.context import build_wallet_context
+        from agent.wallet.context import build_not_punks_holder_context, build_wallet_context
 
         ctx = build_wallet_context()
     except Exception:
         ctx = None
+    if ctx and not bool(getattr(ctx, "can_create_skills", False)):
+        try:
+            beta_ctx = build_not_punks_holder_context()
+        except Exception:
+            beta_ctx = None
+        if beta_ctx and bool(getattr(beta_ctx, "can_create_skills", False)):
+            ctx.can_create_skills = True
+            ctx.can_use_custom_skills = True
+            ctx.access_roles = sorted(set(list(getattr(ctx, "access_roles", []) or []) + list(getattr(beta_ctx, "access_roles", []) or [])))
+            ctx.access_tiers = sorted(set(list(getattr(ctx, "access_tiers", []) or []) + list(getattr(beta_ctx, "access_tiers", []) or [])))
     if ctx:
         return {
             "connected": bool(getattr(ctx, "wallet_address", "")),
@@ -946,7 +956,7 @@ def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any]
             "error": f"Local agent LLM call failed: {exc}",
         }, HTTPStatus.BAD_GATEWAY
 
-    parsed = _extract_json_object(raw)
+    parsed = raw if isinstance(raw, dict) else _extract_json_object(raw)
     draft = _normalize_wizard_draft(parsed.get("draft"))
     reply = str(parsed.get("reply") or raw or "").strip()
     if not reply:
@@ -1004,7 +1014,7 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
         })
         return
 
-    parsed = _extract_json_object(raw)
+    parsed = raw if isinstance(raw, dict) else _extract_json_object(raw)
     draft = _normalize_wizard_draft(parsed.get("draft"))
     reply = str(parsed.get("reply") or raw or "").strip()
     if not reply:
@@ -1023,19 +1033,29 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
 
 
 def _require_beta_wallet() -> tuple[Any | None, dict[str, Any] | None]:
-    from agent.wallet.context import build_wallet_context
+    from agent.wallet.context import build_not_punks_holder_context, build_wallet_context
 
     ctx = build_wallet_context()
     if not ctx:
         return None, {"ok": False, "error": "No wallet connected in local agent"}
     if not getattr(ctx, "can_create_skills", False):
-        return None, {
-            "ok": False,
-            "error": "Beta access is locked. Connect a wallet holding at least one NOT Punks NFT.",
-            "walletAddress": getattr(ctx, "wallet_address", ""),
-            "roles": list(getattr(ctx, "access_roles", []) or []),
-            "tiers": list(getattr(ctx, "access_tiers", []) or []),
-        }
+        try:
+            beta_ctx = build_not_punks_holder_context()
+        except Exception:
+            beta_ctx = None
+        if beta_ctx and getattr(beta_ctx, "can_create_skills", False):
+            ctx.can_create_skills = True
+            ctx.can_use_custom_skills = True
+            ctx.access_roles = sorted(set(list(getattr(ctx, "access_roles", []) or []) + list(getattr(beta_ctx, "access_roles", []) or [])))
+            ctx.access_tiers = sorted(set(list(getattr(ctx, "access_tiers", []) or []) + list(getattr(beta_ctx, "access_tiers", []) or [])))
+        else:
+            return None, {
+                "ok": False,
+                "error": "Beta access is locked. Connect a wallet holding at least one NOT Punks NFT.",
+                "walletAddress": getattr(ctx, "wallet_address", ""),
+                "roles": list(getattr(ctx, "access_roles", []) or []),
+                "tiers": list(getattr(ctx, "access_tiers", []) or []),
+            }
     return ctx, None
 
 

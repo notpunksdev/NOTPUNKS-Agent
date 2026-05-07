@@ -145,6 +145,43 @@ def test_local_bridge_status(monkeypatch):
         handle.stop()
 
 
+def test_local_bridge_status_uses_not_punks_fallback_for_create_access(monkeypatch):
+    import agent.wallet.context as wallet_context
+    import hermes_cli.skill_marketplace as skill_marketplace
+    from hermes_cli.local_bridge import start_local_bridge
+
+    monkeypatch.setattr(skill_marketplace, "list_installed_marketplace_skills", lambda name="": [])
+    monkeypatch.setattr(wallet_context, "build_wallet_context", lambda: SimpleNamespace(
+        wallet_address="EQwallet",
+        network="mainnet",
+        can_create_skills=False,
+        can_publish_skills=False,
+        can_use_custom_skills=False,
+        access_roles=[],
+        access_tiers=[],
+        matching_pair_numbers=[],
+    ))
+    monkeypatch.setattr(wallet_context, "build_not_punks_holder_context", lambda: SimpleNamespace(
+        wallet_address="EQwallet",
+        network="mainnet",
+        can_create_skills=True,
+        can_use_custom_skills=True,
+        access_roles=["not_punks_holder"],
+        access_tiers=["beta"],
+    ))
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(handle.port, "GET", "/api/skills/marketplace/status", origin="https://skilzzz.com")
+        assert status == 200
+        assert payload["wallet"]["canCreateSkills"] is True
+        assert payload["wallet"]["canPublishSkills"] is False
+        assert "beta" in payload["wallet"]["tiers"]
+    finally:
+        handle.stop()
+
+
 def test_local_bridge_allows_agent_origin_and_root_health(monkeypatch):
     from hermes_cli.local_bridge import start_local_bridge
 
@@ -765,6 +802,49 @@ def test_local_bridge_skill_wizard_chat_requires_beta_access(monkeypatch):
         assert status == 403
         assert payload["ok"] is False
         assert "Beta access is locked" in payload["error"]
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_skill_wizard_chat_allows_not_punks_fallback(monkeypatch):
+    import agent.wallet.context as wallet_context
+    import hermes_cli.local_bridge as local_bridge
+    from hermes_cli.local_bridge import start_local_bridge
+
+    monkeypatch.setattr(wallet_context, "build_wallet_context", lambda: SimpleNamespace(
+        wallet_address="EQwallet",
+        can_create_skills=False,
+        can_use_custom_skills=False,
+        access_roles=[],
+        access_tiers=[],
+        matching_pair_numbers=[],
+    ))
+    monkeypatch.setattr(wallet_context, "build_not_punks_holder_context", lambda: SimpleNamespace(
+        wallet_address="EQwallet",
+        can_create_skills=True,
+        can_use_custom_skills=True,
+        access_roles=["not_punks_holder"],
+        access_tiers=["beta"],
+    ))
+    monkeypatch.setattr(local_bridge, "_run_skill_wizard_agent", lambda _prompt: {
+        "reply": "Allowed",
+        "done": False,
+        "draft": {"name": "wallet-debug"},
+    })
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/wizard-chat",
+            body={"messages": [{"role": "user", "content": "create"}]},
+            origin="https://skilzzz.com",
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["walletAddress"] == "EQwallet"
     finally:
         handle.stop()
 
