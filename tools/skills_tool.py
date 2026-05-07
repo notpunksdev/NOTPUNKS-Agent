@@ -625,6 +625,45 @@ def _sort_skills(skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(skills, key=lambda s: (s.get("category") or "", s["name"]))
 
 
+def _resolve_skill_dir(name: str) -> tuple[Path, Path] | None:
+    """Resolve a skill name/path to (skill_dir, skill_md)."""
+    from agent.skill_utils import get_external_skills_dirs, iter_skill_index_files
+
+    raw = (name or "").strip()
+    if not raw:
+        return None
+
+    direct_path = Path(raw).expanduser()
+    if direct_path.is_absolute() and direct_path.exists():
+        if direct_path.is_dir() and (direct_path / "SKILL.md").exists():
+            return direct_path, direct_path / "SKILL.md"
+        if direct_path.name == "SKILL.md":
+            return direct_path.parent, direct_path
+
+    all_dirs = []
+    if SKILLS_DIR.exists():
+        all_dirs.append(SKILLS_DIR)
+    all_dirs.extend(get_external_skills_dirs())
+
+    for search_dir in all_dirs:
+        candidate = search_dir / raw
+        if candidate.is_dir() and (candidate / "SKILL.md").exists():
+            return candidate, candidate / "SKILL.md"
+
+    for search_dir in all_dirs:
+        for found_skill_md in iter_skill_index_files(search_dir, "SKILL.md"):
+            if found_skill_md.parent.name == raw:
+                return found_skill_md.parent, found_skill_md
+            try:
+                content = found_skill_md.read_text(encoding="utf-8")[:4000]
+                frontmatter, _ = _parse_frontmatter(content)
+                if str(frontmatter.get("name") or "") == raw:
+                    return found_skill_md.parent, found_skill_md
+            except Exception:
+                continue
+    return None
+
+
 def _load_category_description(category_dir: Path) -> Optional[str]:
     """
     Load category description from DESCRIPTION.md if it exists.
@@ -1068,6 +1107,44 @@ def skill_view(
 
         encrypted_runtime = skill_dir and (skill_dir / ".notpunks-snft" / "manifest.json").exists()
         if encrypted_runtime:
+            if not file_path:
+                try:
+                    from hermes_cli.skill_marketplace import describe_encrypted_snft_skill
+
+                    described = describe_encrypted_snft_skill(skill_dir)
+                except Exception as e:
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"Encrypted sNFT skill metadata load failed: {e}",
+                        },
+                        ensure_ascii=False,
+                    )
+                if not described.get("ok"):
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": described.get("error") or "Encrypted sNFT skill metadata load failed",
+                        },
+                        ensure_ascii=False,
+                    )
+                return json.dumps(
+                    {
+                        "success": True,
+                        "name": described.get("name") or name,
+                        "description": described.get("description") or "",
+                        "content": described.get("content") or "",
+                        "path": str(skill_md.relative_to(SKILLS_DIR)) if skill_md else "",
+                        "skill_dir": str(skill_dir) if skill_dir else None,
+                        "source_kind": "snft_encrypted_runtime",
+                        "protected_runtime": True,
+                        "runtime_mode": described.get("runtime_mode") or "local_protected",
+                        "source_export": bool(described.get("source_export")),
+                        "usage_hint": "Call skill_run_protected(name, task, conversation_context) to use this paid protected skill without exposing raw instructions.",
+                        "readiness_status": SkillReadinessStatus.AVAILABLE.value,
+                    },
+                    ensure_ascii=False,
+                )
             try:
                 from hermes_cli.skill_marketplace import load_encrypted_snft_skill_file
 
@@ -1100,6 +1177,9 @@ def skill_view(
                         "content": content,
                         "is_binary": True,
                         "source_kind": "snft_encrypted_runtime",
+                        "protected_runtime": bool(unlocked.get("protected_runtime")),
+                        "runtime_mode": unlocked.get("runtime_mode") or "local_protected",
+                        "source_export": bool(unlocked.get("source_export")),
                     },
                     ensure_ascii=False,
                 )
@@ -1112,6 +1192,9 @@ def skill_view(
                         "content": content,
                         "file_type": Path(str(unlocked.get("file") or file_path)).suffix,
                         "source_kind": "snft_encrypted_runtime",
+                        "protected_runtime": bool(unlocked.get("protected_runtime")),
+                        "runtime_mode": unlocked.get("runtime_mode") or "local_protected",
+                        "source_export": bool(unlocked.get("source_export")),
                     },
                     ensure_ascii=False,
                 )
@@ -1405,6 +1488,13 @@ def skill_view(
             if setup_needed
             else SkillReadinessStatus.AVAILABLE.value,
         }
+        if encrypted_runtime:
+            result["source_kind"] = "snft_encrypted_runtime"
+            result["protected_runtime"] = True
+            result["runtime_mode"] = unlocked.get("runtime_mode") or "local_protected"
+            result["source_export"] = bool(unlocked.get("source_export"))
+            if isinstance(unlocked.get("memory_hardening"), dict):
+                result["memory_hardening"] = unlocked.get("memory_hardening")
 
         setup_help = next((e["help"] for e in required_env_vars if e.get("help")), None)
         if setup_help:
@@ -1437,6 +1527,69 @@ def skill_view(
 
         return json.dumps(result, ensure_ascii=False)
 
+    except Exception as e:
+        return tool_error(str(e), success=False)
+
+
+def skill_run_protected(
+    name: str,
+    task: str,
+    conversation_context: str = "",
+    user_files: str = "",
+    task_id: str = None,
+) -> str:
+    """Run an encrypted protected sNFT skill and return only its result."""
+    try:
+        resolved = _resolve_skill_dir(name)
+        if not resolved:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"Skill '{name}' not found.",
+                    "hint": "Use skills_list to see available skills",
+                },
+                ensure_ascii=False,
+            )
+        skill_dir, _skill_md = resolved
+        if not (skill_dir / ".notpunks-snft" / "manifest.json").exists():
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"Skill '{name}' is not a protected sNFT runtime skill.",
+                    "hint": "Use skill_view for ordinary skills.",
+                },
+                ensure_ascii=False,
+            )
+        from hermes_cli.skill_marketplace import run_encrypted_snft_skill
+
+        result = run_encrypted_snft_skill(
+            skill_dir,
+            task=task,
+            conversation_context=conversation_context,
+            user_files=user_files,
+        )
+        if not result.get("ok"):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": result.get("error") or "Protected sNFT skill runtime failed",
+                    "runtime_mode": result.get("runtime_mode") or "local_protected",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "success": True,
+                "name": name,
+                "result": result.get("result") or "",
+                "source_kind": "snft_encrypted_runtime",
+                "protected_runtime": True,
+                "runtime_mode": result.get("runtime_mode") or "local_protected",
+                "source_export": False,
+                "memory_hardening": result.get("memory_hardening") or {},
+            },
+            ensure_ascii=False,
+        )
     except Exception as e:
         return tool_error(str(e), success=False)
 
@@ -1507,7 +1660,7 @@ SKILLS_LIST_SCHEMA = {
 
 SKILL_VIEW_SCHEMA = {
     "name": "skill_view",
-    "description": "Skills allow for loading information about specific tasks and workflows, as well as scripts and templates. Load a skill's full content or access its linked files (references, templates, scripts). First call returns SKILL.md content plus a 'linked_files' dict showing available references/templates/scripts. To access those, call again with file_path parameter.",
+    "description": "Skills allow for loading information about specific tasks and workflows, as well as scripts and templates. Load an ordinary skill's full content or access linked files. For protected sNFT skills, this returns only a protected runtime handle; use skill_run_protected to execute the skill.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1521,6 +1674,33 @@ SKILL_VIEW_SCHEMA = {
             },
         },
         "required": ["name"],
+    },
+}
+
+SKILL_RUN_PROTECTED_SCHEMA = {
+    "name": "skill_run_protected",
+    "description": "Run a paid protected sNFT skill through the local protected runtime. Use this for protected_runtime skills instead of trying to read SKILL.md. Pass the user's task plus relevant conversation context; the tool returns only the result, not the raw skill instructions.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Protected sNFT skill name.",
+            },
+            "task": {
+                "type": "string",
+                "description": "The concrete user task to perform with the protected skill.",
+            },
+            "conversation_context": {
+                "type": "string",
+                "description": "Relevant prior conversation, constraints, user preferences, and current facts needed by the runtime.",
+            },
+            "user_files": {
+                "type": "string",
+                "description": "Optional user-provided file excerpts or document text needed for the task.",
+            },
+        },
+        "required": ["name", "task"],
     },
 }
 
@@ -1543,4 +1723,18 @@ registry.register(
     ),
     check_fn=check_skills_requirements,
     emoji="📚",
+)
+registry.register(
+    name="skill_run_protected",
+    toolset="skills",
+    schema=SKILL_RUN_PROTECTED_SCHEMA,
+    handler=lambda args, **kw: skill_run_protected(
+        args.get("name", ""),
+        args.get("task", ""),
+        conversation_context=args.get("conversation_context", ""),
+        user_files=args.get("user_files", ""),
+        task_id=kw.get("task_id"),
+    ),
+    check_fn=check_skills_requirements,
+    emoji="🔒",
 )

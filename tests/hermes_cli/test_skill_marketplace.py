@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import base64
 import hashlib
+import json
 
 from hermes_cli.skill_marketplace import (
     _agent_build_hash,
@@ -15,6 +16,7 @@ from hermes_cli.skill_marketplace import (
     install_marketplace_skill,
     install_snft_from_metadata_url,
     list_installed_marketplace_skills,
+    load_encrypted_snft_skill_file,
     load_listing,
     normalize_marketplace_listing,
     _snft_browser_signer_config,
@@ -39,6 +41,18 @@ from hermes_cli.skills_hub import (
 )
 from io import StringIO
 from rich.console import Console
+
+
+def test_snft_locked_secret_zeroize():
+    from hermes_cli.snft_memory import lock_secret, unlock_secret
+
+    secret = lock_secret(b"top-secret")
+    assert bytes(secret.buffer) == b"top-secret"
+
+    secret.zeroize()
+    unlock_secret(secret)
+
+    assert bytes(secret.buffer) == b"\x00" * len("top-secret")
 
 
 def test_listing_defaults_to_holder_access(tmp_path, monkeypatch):
@@ -604,8 +618,48 @@ def test_install_marketplace_skill_prefers_encrypted_snft_cartridge(tmp_path, mo
     from tools.skills_tool import skill_view
 
     viewed = skill_view("alpha", preprocess=False)
-    assert '"success": true' in viewed
-    assert "# Alpha" in viewed
+    viewed_payload = json.loads(viewed)
+    assert viewed_payload["success"] is True
+    assert viewed_payload["protected_runtime"] is True
+    assert viewed_payload["runtime_mode"] == "local_protected"
+    assert viewed_payload["source_export"] is False
+    assert "Protected sNFT Skill" in viewed_payload["content"]
+    assert "skill_run_protected" in viewed_payload["content"]
+    assert "# Alpha" not in viewed_payload["content"]
+
+    direct_source = json.loads(skill_view("alpha", file_path="SKILL.md", preprocess=False))
+    assert direct_source["success"] is False
+    assert "source export is disabled" in direct_source["error"]
+
+    unlocked = load_encrypted_snft_skill_file(skills_dir / "alpha", "")
+    assert unlocked["ok"] is True
+    assert unlocked["memory_hardening"]["core_dumps_disabled"] in {True, False}
+
+    captured_messages = {}
+
+    def fake_call_llm(**kwargs):
+        captured_messages["messages"] = kwargs["messages"]
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="protected runtime answer")
+                )
+            ]
+        )
+
+    monkeypatch.setattr("agent.auxiliary_client.call_llm", fake_call_llm)
+
+    from tools.skills_tool import skill_run_protected
+
+    protected_run = json.loads(skill_run_protected(
+        "alpha",
+        "Use the skill for this task",
+        conversation_context="User context stays outside the public skill view.",
+    ))
+    assert protected_run["success"] is True
+    assert protected_run["result"] == "protected runtime answer"
+    assert "# Alpha" in captured_messages["messages"][0]["content"]
+    assert "User context stays outside" in captured_messages["messages"][1]["content"]
 
 
 def test_install_snft_from_metadata_url_installs_without_marketplace_listing(tmp_path, monkeypatch):
