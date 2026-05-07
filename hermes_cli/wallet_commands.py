@@ -466,7 +466,7 @@ def _hosted_wallet_session_url(session_id: str, payload: str) -> str:
         "session_id": session_id,
         "payload": payload,
     }
-    return f"https://skilzzz.com/wallet-connect?{urllib.parse.urlencode(params)}"
+    return f"https://skilzzz.com/pair-agent?{urllib.parse.urlencode(params)}"
 
 
 HOSTED_WALLET_SESSION_TIMEOUT = 2 * 60 * 60
