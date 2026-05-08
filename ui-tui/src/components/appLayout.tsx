@@ -9,7 +9,7 @@ import { $uiState } from '../app/uiStore.js'
 import { INLINE_MODE, SHOW_FPS } from '../config/env.js'
 import { FULL_RENDER_TAIL_ITEMS } from '../config/limits.js'
 import { PLACEHOLDER } from '../content/placeholders.js'
-import { inputVisualHeight, stableComposerColumns } from '../lib/inputMetrics.js'
+import { stableComposerColumns, stableInputVisualHeight } from '../lib/inputMetrics.js'
 import { PerfPane } from '../lib/perfPane.js'
 
 import { AgentsOverlay } from './agentsOverlay.js'
@@ -21,6 +21,8 @@ import { MessageLine } from './messageLine.js'
 import { QueuedMessages } from './queuedMessages.js'
 import { LiveTodoPanel, StreamingAssistant } from './streamingAssistant.js'
 import { TextInput, type TextInputMouseApi } from './textInput.js'
+
+const BUSY_PLACEHOLDER = 'Ctrl+C to interrupt…'
 
 const TranscriptPane = memo(function TranscriptPane({
   actions,
@@ -126,7 +128,8 @@ const ComposerPane = memo(function ComposerPane({
   const sh = (composer.inputBuf[0] ?? composer.input).startsWith('!')
   const pw = 2
   const inputColumns = stableComposerColumns(composer.cols, pw)
-  const inputHeight = inputVisualHeight(composer.input, inputColumns)
+  const placeholder = composer.empty ? PLACEHOLDER : ui.busy ? BUSY_PLACEHOLDER : ''
+  const inputHeight = stableInputVisualHeight(composer.input, inputColumns, [PLACEHOLDER, BUSY_PLACEHOLDER])
   const inputMouseRef = useRef<null | TextInputMouseApi>(null)
 
   const captureInputDrag = (e: GutterMouseEvent) => {
@@ -241,7 +244,7 @@ const ComposerPane = memo(function ComposerPane({
                   onChange={composer.updateInput}
                   onPaste={composer.handleTextPaste}
                   onSubmit={composer.submit}
-                  placeholder={composer.empty ? PLACEHOLDER : ui.busy ? 'Ctrl+C to interrupt…' : ''}
+                  placeholder={placeholder}
                   value={composer.input}
                 />
 
@@ -328,8 +331,8 @@ export const AppLayout = memo(function AppLayout({
 
   return (
     <Shell {...shellProps}>
-      <Box flexDirection="column" flexGrow={1}>
-        <Box flexDirection="row" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1} minHeight={1}>
+        <Box flexDirection="row" flexGrow={1} flexShrink={1} minHeight={1}>
           {overlay.agents ? (
             <PerfPane id="agents">
               <AgentsOverlayPane />
