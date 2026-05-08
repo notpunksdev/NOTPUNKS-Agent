@@ -201,8 +201,7 @@ def _wallet_connect(console=None, blocking: bool = True, web: bool = False) -> i
         return _wallet_connect_web(console=console, blocking=blocking)
 
     console = _get_console(console)
-    config = load_config()
-    network = config.get("wallet", {}).get("network", "mainnet")
+    network = "mainnet"
 
     connector = WalletConnector(network=network)
 
@@ -503,8 +502,7 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
                   When False (slash command), shows link and returns immediately.
     """
     console = _get_console(console)
-    config = load_config()
-    network = config.get("wallet", {}).get("network", "mainnet")
+    network = "mainnet"
 
     # Check if already connected
     connector = WalletConnector(network=network)

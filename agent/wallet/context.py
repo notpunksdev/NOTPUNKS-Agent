@@ -57,6 +57,26 @@ def build_wallet_context(config: dict | None = None, *, force_refresh: bool = Fa
         logging.getLogger(__name__).warning(f"NFT scan failed: {e}")
         nfts = []
 
+    # NOT Punks holder collections live on mainnet. If a stale config says the
+    # wallet network is testnet, still include the mainnet holder scan so the
+    # closed agent gate does not false-lock a valid holder.
+    if network != "mainnet":
+        try:
+            mainnet_scanner = NFTScanner(network="mainnet", api_key=api_key, tonapi_key=tonapi_key)
+            holder_nfts = mainnet_scanner.scan_collections(
+                address,
+                [NOT_PUNKS_ADDR, NOT_PUNKS_GIRLS_ADDR, ELEMENTAL_KIDS_ADDR],
+            )
+            existing = {_nft_identity(nft) for nft in nfts}
+            for nft in holder_nfts:
+                ident = _nft_identity(nft)
+                if ident not in existing:
+                    existing.add(ident)
+                    nfts.append(nft)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"NOT Punks mainnet holder scan failed: {e}")
+
     # During the Skill NFT rollout the license collection is deployed on
     # testnet while legacy holder collections remain on mainnet. Scan the
     # testnet license collection as an additive source so minted licenses are
@@ -119,10 +139,10 @@ def build_not_punks_holder_context(config: dict | None = None, *, force_refresh:
     if not address:
         return None
 
-    network = wallet_cfg.get("network", "mainnet")
+    wallet_network = wallet_cfg.get("network", "mainnet")
     api_key = _wallet_secret(wallet_cfg, "toncenter_api_key", "TONCENTER_API_KEY", "TONCENTER_TOKEN")
     tonapi_key = _wallet_secret(wallet_cfg, "tonapi_key", "TONAPI_API_KEY", "TONAPI_TOKEN")
-    scanner = NFTScanner(network=network, api_key=api_key, tonapi_key=tonapi_key)
+    scanner = NFTScanner(network="mainnet", api_key=api_key, tonapi_key=tonapi_key)
     try:
         nfts = scanner.scan_collections(address, [NOT_PUNKS_ADDR])
     except Exception as e:
@@ -134,7 +154,7 @@ def build_not_punks_holder_context(config: dict | None = None, *, force_refresh:
     return WalletContext(
         wallet_address=address,
         verified=wallet_cfg.get("verified", False) or len(nfts) > 0,
-        network=network,
+        network=wallet_network,
         active_modes=[],
         nfts=nfts,
         can_create_skills=bool(access["can_create_skills"]),
@@ -147,6 +167,10 @@ def build_not_punks_holder_context(config: dict | None = None, *, force_refresh:
         access_tiers=list(access.get("access_tiers") or []),
         skill_licenses={},
     )
+
+
+def _nft_identity(nft: NFTItem) -> str:
+    return str(getattr(nft, "address", "") or f"{getattr(nft, 'collection_address', '')}:{getattr(nft, 'index', '')}")
 
 
 def wallet_context_has_not_punks(ctx: WalletContext | None) -> bool:

@@ -7,6 +7,7 @@ from agent.wallet.context import (
     build_nft_access,
     _wallet_secret,
 )
+import agent.wallet.context as wallet_context
 from agent.wallet.models import NFTItem
 from agent.wallet import nft_scanner
 from agent.wallet.nft_scanner import NFTScanner
@@ -87,6 +88,34 @@ def test_nft_scanner_scan_collections_uses_only_targeted_fetch(monkeypatch):
     assert len(result) == 1
     assert result[0].name == "NOT Punks #1"
     assert calls
+
+
+def test_not_punks_gate_scans_mainnet_even_when_wallet_config_is_testnet(monkeypatch):
+    calls = []
+
+    class FakeScanner:
+        def __init__(self, network="mainnet", api_key="", tonapi_key=""):
+            self.network = network
+
+        def scan_collections(self, owner, collections):
+            calls.append((self.network, owner, tuple(collections)))
+            return [_nft("NOT Punks #2335", NOT_PUNKS_ADDR)]
+
+    monkeypatch.setattr(wallet_context, "NFTScanner", FakeScanner)
+
+    ctx = wallet_context.build_not_punks_holder_context({
+        "wallet": {
+            "address": "EQBNIbhHIvKOxa6S9sJEl5JVNH8ZqWkrz2BtMxUhQb8Szr5P",
+            "network": "testnet",
+            "verified": True,
+        },
+        "nft": {"collections": {}},
+    })
+
+    assert ctx is not None
+    assert ctx.network == "testnet"
+    assert wallet_context.wallet_context_not_punks_count(ctx) == 1
+    assert calls == [("mainnet", "EQBNIbhHIvKOxa6S9sJEl5JVNH8ZqWkrz2BtMxUhQb8Szr5P", (NOT_PUNKS_ADDR,))]
 
 
 def test_wallet_secret_prefers_config_then_env(monkeypatch):
