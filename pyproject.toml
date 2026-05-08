@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "notpunks-agent"
-version = "0.11.6"
+version = "0.11.7"
 description = "NOTPUNKS Agent — self-improving AI agent that creates skills from experience and runs anywhere"
 readme = "README.md"
 requires-python = ">=3.11"
