@@ -184,6 +184,8 @@ class NFTScanner:
         filtered: list[NFTItem] = []
         seen_addresses: set[str] = set()
         items = self._fetch_target_collection_nfts(owner_address, normalized_targets)
+        if not items:
+            items = self._fetch_nfts(owner_address)
         for item in items:
             collection = self._normalize_address(item.collection_address)
             if collection not in normalized_targets:

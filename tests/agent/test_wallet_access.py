@@ -90,6 +90,23 @@ def test_nft_scanner_scan_collections_uses_only_targeted_fetch(monkeypatch):
     assert calls
 
 
+def test_nft_scanner_scan_collections_falls_back_to_broad_scan(monkeypatch):
+    scanner = NFTScanner.__new__(NFTScanner)
+    scanner.network = "mainnet"
+
+    monkeypatch.setattr(scanner, "_fetch_target_collection_nfts", lambda owner, collections: [])
+    monkeypatch.setattr(scanner, "_fetch_nfts", lambda owner: [
+        _nft("NOT Punks #1", "0:cff67196d87a34574fe96d6f2aa71daadd525577d9f406d6d08edb365ea648ad"),
+        _nft("Other #1", "other-collection"),
+    ])
+    monkeypatch.setattr(scanner, "_enrich_metadata", lambda item: None)
+
+    result = scanner.scan_collections("owner", [NOT_PUNKS_ADDR])
+
+    assert len(result) == 1
+    assert result[0].name == "NOT Punks #1"
+
+
 def test_not_punks_gate_scans_mainnet_even_when_wallet_config_is_testnet(monkeypatch):
     calls = []
 
