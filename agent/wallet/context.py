@@ -356,7 +356,7 @@ def _same_address(left: str, right: str) -> bool:
         return True
     try:
         from pytoniq_core import Address
-        return Address(left).to_str(is_user_friendly=True) == Address(right).to_str(is_user_friendly=True)
+        return Address(left).to_str(is_user_friendly=False) == Address(right).to_str(is_user_friendly=False)
     except Exception:
         return False
 

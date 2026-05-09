@@ -111,12 +111,12 @@ class NFTScanner:
         return {}
 
     def _normalize_address(self, addr: str) -> str:
-        """Convert TON address to user-friendly bounceable format for comparison."""
+        """Convert TON address to raw workchain:hash format for comparison."""
         addr = addr.strip()
         if addr.startswith(("EQ", "UQ", "0:")):
             try:
                 from pytoniq_core import Address
-                return Address(addr).to_str(is_user_friendly=True)
+                return Address(addr).to_str(is_user_friendly=False)
             except Exception:
                 pass
         return addr

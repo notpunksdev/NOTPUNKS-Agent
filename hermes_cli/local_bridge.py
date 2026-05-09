@@ -367,6 +367,23 @@ def _signed_payload_text(result: dict[str, Any]) -> str:
     return ""
 
 
+def _ton_address_key(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        from pytoniq_core import Address
+        return Address(raw).to_str(is_user_friendly=False)
+    except Exception:
+        return raw
+
+
+def _same_ton_address(left: str, right: str) -> bool:
+    left_key = _ton_address_key(left)
+    right_key = _ton_address_key(right)
+    return bool(left_key and right_key and left_key == right_key)
+
+
 def _validate_install_wallet_signature(body: dict[str, Any]) -> tuple[bool, str]:
     signature = body.get("walletSignature")
     if not isinstance(signature, dict):
@@ -378,7 +395,7 @@ def _validate_install_wallet_signature(body: dict[str, Any]) -> tuple[bool, str]
     if not requested_wallet:
         return False, "walletAddress is required for signed marketplace install"
     signed_address = str(result.get("address") or "").strip()
-    if signed_address and signed_address != requested_wallet:
+    if signed_address and not _same_ton_address(signed_address, requested_wallet):
         return False, "Wallet signature address does not match install wallet"
     try:
         signed_at = float(result.get("timestamp") or 0)
@@ -940,6 +957,17 @@ def _marketplace_skill_wizard_prompt(body: dict[str, Any]) -> str:
     ])
 
 
+def _looks_like_skill_instruction(text: str) -> bool:
+    candidate = (text or "").strip()
+    if len(candidate) < 120:
+        return False
+    return bool(re.search(
+        r"(^|\n)\s*#{1,3}\s+|when to use|inputs|workflow|error handling|verification|boundaries|когда использовать|входные данные|процесс|проверка|огранич",
+        candidate,
+        flags=re.IGNORECASE,
+    ))
+
+
 def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any], int]:
     ctx, error = _require_beta_wallet()
     if error:
@@ -961,6 +989,9 @@ def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any]
     reply = str(parsed.get("reply") or raw or "").strip()
     if not reply:
         return _wizard_fallback_response(body, ctx, "Local agent returned an empty wizard reply")
+    action = str(body.get("action") or "chat").strip().lower()
+    if action == "generate" and not str(draft.get("instructions") or "").strip() and _looks_like_skill_instruction(reply):
+        draft["instructions"] = reply
     done = bool(parsed.get("done"))
     missing = parsed.get("missing") if isinstance(parsed.get("missing"), list) else []
     return {
@@ -1021,6 +1052,9 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
         payload, _status = _wizard_fallback_response(body, ctx, "Local agent returned an empty wizard reply")
         _stream_wizard_reply(handler, payload)
         return
+    action = str(body.get("action") or "chat").strip().lower()
+    if action == "generate" and not str(draft.get("instructions") or "").strip() and _looks_like_skill_instruction(reply):
+        draft["instructions"] = reply
     missing = parsed.get("missing") if isinstance(parsed.get("missing"), list) else []
     _stream_wizard_reply(handler, {
         "ok": True,
@@ -1409,7 +1443,7 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
     approved_payload_matches = (
         request.get("name") == skill_name
         and bool(request.get("force")) == bool(body.get("force"))
-        and str(request.get("walletAddress") or "") == requested_wallet
+        and _same_ton_address(str(request.get("walletAddress") or ""), requested_wallet)
         and str(request.get("metadataUrl") or "") == metadata_url
         and str(request.get("expectedBundleHash") or "") == expected_bundle_hash
         and str(request.get("mode") or "install") == mode
@@ -1439,7 +1473,7 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
     if not ctx:
         _notify_install_result(request_id, skill_name, ok=False, message="No wallet connected in local agent")
         return {"ok": False, "error": "No wallet connected in local agent"}, HTTPStatus.CONFLICT
-    if requested_wallet and str(getattr(ctx, "wallet_address", "") or "").strip() != requested_wallet:
+    if requested_wallet and not _same_ton_address(str(getattr(ctx, "wallet_address", "") or ""), requested_wallet):
         _notify_install_result(
             request_id,
             skill_name,
@@ -1568,7 +1602,7 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
         }, HTTPStatus.ACCEPTED
     approved_payload_matches = (
         request.get("name") == skill_name
-        and str(request.get("walletAddress") or "") == requested_wallet
+        and _same_ton_address(str(request.get("walletAddress") or ""), requested_wallet)
         and str(request.get("metadataUrl") or "") == metadata_url
         and str(request.get("expectedBundleHash") or "") == expected_bundle_hash
         and str(request.get("mode") or "") == "uninstall"
