@@ -84,17 +84,17 @@ class TestTencentTokenhubAliases:
         assert normalize_provider("tencent-cloud") == "tencent-tokenhub"
         assert normalize_provider("tencentmaas") == "tencent-tokenhub"
 
-    def test_hy3_model_alias_targets_openrouter_slug(self):
+    def test_hy3_model_alias_targets_direct_tokenhub(self):
         from hermes_cli.model_switch import resolve_alias
         assert resolve_alias("hy3", "openrouter") == (
-            "openrouter",
-            "tencent/hy3-preview",
+            "tencent-tokenhub",
+            "hy3-preview",
             "hy3",
         )
 
-    def test_hy3_model_alias_targets_tokenhub_when_tokenhub_active(self):
+    def test_hy3_preview_reverse_alias_targets_direct_tokenhub(self):
         from hermes_cli.model_switch import resolve_alias
-        assert resolve_alias("hy3", "tencent-tokenhub") == (
+        assert resolve_alias("hy3-preview", "openrouter") == (
             "tencent-tokenhub",
             "hy3-preview",
             "hy3",
