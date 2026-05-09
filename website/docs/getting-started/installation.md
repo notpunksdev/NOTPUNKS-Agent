@@ -42,11 +42,11 @@ Native Windows is **not supported**. Please install [WSL2](https://learn.microso
 Prefer a pinned release archive instead of the remote installer:
 
 ```text
-Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-linux-x64.tar.gz
-macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-macos-arm64.tar.gz
-Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-windows-wsl.zip
-Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/checksums.txt
-Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/build-hashes.txt
+Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/NOTPUNKS-Agent-0.11.12-linux-x64.tar.gz
+macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/NOTPUNKS-Agent-0.11.12-macos-arm64.tar.gz
+Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/NOTPUNKS-Agent-0.11.12-windows-wsl.zip
+Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/checksums.txt
+Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/build-hashes.txt
 ```
 
 ### What the Installer Does
