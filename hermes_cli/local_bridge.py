@@ -386,6 +386,14 @@ def _same_ton_address(left: str, right: str) -> bool:
     return bool(left_key and right_key and left_key == right_key)
 
 
+def _same_optional_ton_address(left: str, right: str) -> bool:
+    left_raw = str(left or "").strip()
+    right_raw = str(right or "").strip()
+    if not left_raw and not right_raw:
+        return True
+    return _same_ton_address(left_raw, right_raw)
+
+
 def _validate_install_wallet_signature(body: dict[str, Any]) -> tuple[bool, str]:
     signature = body.get("walletSignature")
     if not isinstance(signature, dict):
@@ -1445,7 +1453,7 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
     approved_payload_matches = (
         request.get("name") == skill_name
         and bool(request.get("force")) == bool(body.get("force"))
-        and _same_ton_address(str(request.get("walletAddress") or ""), requested_wallet)
+        and _same_optional_ton_address(str(request.get("walletAddress") or ""), requested_wallet)
         and str(request.get("metadataUrl") or "") == metadata_url
         and str(request.get("expectedBundleHash") or "") == expected_bundle_hash
         and str(request.get("mode") or "install") == mode
@@ -1604,7 +1612,7 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
         }, HTTPStatus.ACCEPTED
     approved_payload_matches = (
         request.get("name") == skill_name
-        and _same_ton_address(str(request.get("walletAddress") or ""), requested_wallet)
+        and _same_optional_ton_address(str(request.get("walletAddress") or ""), requested_wallet)
         and str(request.get("metadataUrl") or "") == metadata_url
         and str(request.get("expectedBundleHash") or "") == expected_bundle_hash
         and str(request.get("mode") or "") == "uninstall"
