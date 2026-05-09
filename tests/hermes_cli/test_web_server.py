@@ -734,6 +734,7 @@ class TestNewEndpoints:
     def test_marketplace_skill_uninstall_public(self, monkeypatch):
         from starlette.testclient import TestClient
         import hermes_cli.skill_marketplace as skill_marketplace
+        from hermes_cli.local_bridge import approve_install_request
         from hermes_cli.web_server import app
 
         calls = []
@@ -745,7 +746,18 @@ class TestNewEndpoints:
         })
         monkeypatch.setattr(skill_marketplace, "list_installed_marketplace_skills", lambda name="": [])
 
-        resp = TestClient(app).request("DELETE", "/api/skills/marketplace/install", json={"name": "alpha"})
+        client = TestClient(app)
+        resp = client.request("DELETE", "/api/skills/marketplace/install", json={"name": "alpha"})
+
+        assert resp.status_code == 202
+        assert resp.json()["approval_required"] is True
+        request_id = resp.json()["requestId"]
+        approve_install_request(request_id)
+        resp = client.request(
+            "DELETE",
+            "/api/skills/marketplace/install",
+            json={"name": "alpha", "requestId": request_id},
+        )
 
         assert resp.status_code == 200
         assert resp.json()["uninstalled"]["skillId"] == "alpha"

@@ -88,7 +88,7 @@ _REVEAL_WINDOW_SECONDS = 30
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|https://(app|agent|www\.agent|skills|www\.skills)\.notpunks\.com)$",
+    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|https://(app|agent|www\.agent|skills|www\.skills)\.notpunks\.com|https://(www\.)?skilzzz\.com)$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -348,6 +348,7 @@ _CATEGORY_MERGE: Dict[str, str] = {
     "human_delay": "display",
     "dashboard": "display",
     "code_execution": "agent",
+    "provider_routing": "general",
 }
 
 # Display order for tabs — unlisted categories sort alphabetically after these.
