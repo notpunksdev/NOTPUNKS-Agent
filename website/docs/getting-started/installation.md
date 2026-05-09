@@ -37,6 +37,18 @@ If you want the fully explicit path, follow the dedicated [Termux guide](./termu
 Native Windows is **not supported**. Please install [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and run NOTPUNKS Agent from there. The install command above works inside WSL2.
 :::
 
+### Fixed Release Archives
+
+Prefer a pinned release archive instead of the remote installer:
+
+```text
+Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-linux-x64.tar.gz
+macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-macos-arm64.tar.gz
+Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-windows-wsl.zip
+Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/checksums.txt
+Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/build-hashes.txt
+```
+
 ### What the Installer Does
 
 The installer handles everything automatically — all dependencies (Python, Node.js, ripgrep, ffmpeg), the repo clone, virtual environment, global `hermes` command setup, and LLM provider configuration. By the end, you're ready to chat.

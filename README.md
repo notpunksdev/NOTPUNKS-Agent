@@ -9,15 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://agent.notpunks.com/">Website</a>
-  ·
-  <a href="https://agent.notpunks.com/deploy">Install</a>
-  ·
-  <a href="https://agent.notpunks.com/docs">Docs</a>
-  ·
-  <a href="https://skilzzz.com/">Skill Marketplace</a>
-  ·
-  <a href="https://github.com/notpunksdev/NOTPUNKS-Agent/issues">Issues</a>
+  <a href="https://agent.notpunks.com/"><strong>Website</strong></a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://agent.notpunks.com/docs"><strong>Docs</strong></a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://skilzzz.com/"><strong>Skill Marketplace</strong></a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.11"><strong>Latest Release</strong></a>
 </p>
 
 <p align="center">
@@ -28,14 +26,28 @@
   <img alt="sNFT" src="https://img.shields.io/badge/sNFT-Skill%20NFT%20Protocol-ff00cc?labelColor=111111">
 </p>
 
-```text
-NOTPUNKS_AGENT :: LOCAL_FIRST_AI_OPERATOR
+<p align="center">
+  <a href="#install"><img alt="Install" src="https://img.shields.io/badge/Install-curl%20%7C%20bash-FFD700?style=for-the-badge&labelColor=111111&color=FFD700"></a>
+  <a href="https://agent.notpunks.com/docs"><img alt="Read docs" src="https://img.shields.io/badge/Read-Docs-00ffff?style=for-the-badge&labelColor=111111&color=00ffff"></a>
+  <a href="https://skilzzz.com/"><img alt="Open marketplace" src="https://img.shields.io/badge/Open-Skilzzz-ff00cc?style=for-the-badge&labelColor=111111&color=ff00cc"></a>
+</p>
 
-  terminal       files       browser       memory       cron
-  wallet         skills      marketplace   sNFT         gateway
-
-  install locally -> connect wallet -> create skill -> publish cartridge
-```
+<table>
+  <tr>
+    <td width="33%">
+      <strong>Agent Runtime</strong><br>
+      Terminal, files, browser, memory, cron, messaging, MCP, and local tool execution.
+    </td>
+    <td width="33%">
+      <strong>Skill Marketplace</strong><br>
+      Create, publish, buy, install, license-check, and update agent skills through Skilzzz.
+    </td>
+    <td width="33%">
+      <strong>sNFT Cartridges</strong><br>
+      Package reusable agent workflows as verifiable private Skill NFT cartridges.
+    </td>
+  </tr>
+</table>
 
 NOTPUNKS Agent is an open-source AI operator that runs on your own machine, VPS, or cloud environment. It can work in the terminal, edit files, run tools, use browser/search, remember project context, operate through messaging platforms, and install wallet-gated skills from the NOTPUNKS marketplace.
 
@@ -58,11 +70,11 @@ irm https://agent.notpunks.com/install.ps1 | iex
 Prefer fixed release archives instead of a remote installer:
 
 ```text
-Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/NOTPUNKS-Agent-0.11.6-linux-x64.tar.gz
-macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/NOTPUNKS-Agent-0.11.6-macos-arm64.tar.gz
-Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/NOTPUNKS-Agent-0.11.6-windows-wsl.zip
-Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/checksums.txt
-Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.6/build-hashes.txt
+Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-linux-x64.tar.gz
+macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-macos-arm64.tar.gz
+Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/NOTPUNKS-Agent-0.11.11-windows-wsl.zip
+Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/checksums.txt
+Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.11/build-hashes.txt
 ```
 
 Start the agent:
@@ -333,7 +345,7 @@ If marketplace install is blocked by security scan, inspect the finding first. C
 - Docs: https://agent.notpunks.com/docs
 - Marketplace: https://skilzzz.com/
 - sNFT Protocol: https://snft.notpunks.com/
-- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.6
+- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.11
 - Ecosystem site: https://notpunks.com/
 
 ## License
