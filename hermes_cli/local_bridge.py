@@ -146,6 +146,8 @@ def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[s
         handler.send_response(status)
         _write_cors_headers(handler)
         handler.send_header("Content-Type", "application/json")
+        handler.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        handler.send_header("Pragma", "no-cache")
         handler.send_header("Content-Length", str(len(body)))
         handler.end_headers()
         handler.wfile.write(body)

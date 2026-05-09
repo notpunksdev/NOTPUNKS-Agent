@@ -31,6 +31,7 @@ from hermes_cli.skill_marketplace import (
     record_marketplace_sale,
     save_listing,
     sales_dir,
+    uninstall_marketplace_skill,
 )
 from hermes_cli.skills_hub import (
     do_marketplace_buy,
@@ -506,6 +507,11 @@ def test_install_marketplace_skill_downloads_verifies_and_installs(tmp_path, mon
     assert "Marketplace Skill Install Status" in output
     assert "alpha" in output
     assert "installed" in output
+
+    uninstalled = uninstall_marketplace_skill("alpha")
+    assert uninstalled["skillId"] == "alpha"
+    assert not (skills_dir / "alpha").exists()
+    assert list_installed_marketplace_skills("alpha") == []
 
 
 def test_install_marketplace_skill_prefers_encrypted_snft_cartridge(tmp_path, monkeypatch):
