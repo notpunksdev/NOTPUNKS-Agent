@@ -349,6 +349,7 @@ _CATEGORY_MERGE: Dict[str, str] = {
     "dashboard": "display",
     "code_execution": "agent",
     "provider_routing": "general",
+    "prompt_caching": "agent",
 }
 
 # Display order for tabs — unlisted categories sort alphabetically after these.
@@ -2137,6 +2138,13 @@ class MarketplaceInstallRequest(BaseModel):
 
 class MarketplaceUninstallRequest(BaseModel):
     name: str
+    requestId: str = ""
+    walletAddress: str = ""
+    metadataUrl: str = ""
+    expectedBundleHash: str = ""
+    mode: str = "uninstall"
+    requireWalletSignature: bool = False
+    walletSignature: Dict[str, Any] = {}
 
 
 @app.get("/api/skills")
