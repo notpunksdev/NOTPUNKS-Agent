@@ -149,6 +149,9 @@ MODEL_ALIASES: dict[str, ModelIdentity] = {
     # Xiaomi
     "mimo":      ModelIdentity("xiaomi", "mimo"),
 
+    # Tencent
+    "hy3":       ModelIdentity("tencent", "hy3"),
+
     # Arcee
     "trinity":   ModelIdentity("arcee-ai", "trinity"),
 }
@@ -170,9 +173,7 @@ class DirectAlias(NamedTuple):
 
 
 # Built-in direct aliases (can be extended via config.yaml model_aliases:)
-_BUILTIN_DIRECT_ALIASES: dict[str, DirectAlias] = {
-    "hy3": DirectAlias("hy3-preview", "tencent-tokenhub", ""),
-}
+_BUILTIN_DIRECT_ALIASES: dict[str, DirectAlias] = {}
 
 # Merged dict (builtins + user config); populated by _load_direct_aliases()
 DIRECT_ALIASES: dict[str, DirectAlias] = {}
