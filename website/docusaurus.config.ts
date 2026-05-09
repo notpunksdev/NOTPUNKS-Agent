@@ -3,15 +3,15 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'Hermes Agent',
+  title: 'NOTPUNKS Agent',
   tagline: 'The self-improving AI agent',
   favicon: 'img/favicon.ico',
 
-  url: 'https://hermes-agent.nousresearch.com',
+  url: 'https://agent.notpunks.com',
   baseUrl: '/docs/',
 
-  organizationName: 'NousResearch',
-  projectName: 'hermes-agent',
+  organizationName: 'notpunksdev',
+  projectName: 'NOTPUNKS-Agent',
 
   onBrokenLinks: 'warn',
 
@@ -74,9 +74,8 @@ const config: Config = {
       },
     },
     navbar: {
-      title: 'Hermes Agent',
       logo: {
-        alt: 'Hermes Agent',
+        alt: 'NOTPUNKS Agent',
         src: 'img/logo.png',
       },
       items: [
@@ -92,7 +91,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: 'https://hermes-agent.nousresearch.com',
+          href: 'https://agent.notpunks.com',
           label: 'Home',
           position: 'right',
         },
