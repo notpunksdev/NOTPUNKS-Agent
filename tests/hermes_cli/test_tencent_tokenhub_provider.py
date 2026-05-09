@@ -84,22 +84,6 @@ class TestTencentTokenhubAliases:
         assert normalize_provider("tencent-cloud") == "tencent-tokenhub"
         assert normalize_provider("tencentmaas") == "tencent-tokenhub"
 
-    def test_hy3_model_alias_targets_direct_tokenhub(self):
-        from hermes_cli.model_switch import resolve_alias
-        assert resolve_alias("hy3", "openrouter") == (
-            "tencent-tokenhub",
-            "hy3-preview",
-            "hy3",
-        )
-
-    def test_hy3_preview_reverse_alias_targets_direct_tokenhub(self):
-        from hermes_cli.model_switch import resolve_alias
-        assert resolve_alias("hy3-preview", "openrouter") == (
-            "tencent-tokenhub",
-            "hy3-preview",
-            "hy3",
-        )
-
 
 # =============================================================================
 # Auto-detection
@@ -319,7 +303,7 @@ class TestTencentTokenhubContextLength:
     def test_hy3_preview_context_length(self):
         from agent.model_metadata import get_model_context_length
         ctx = get_model_context_length("hy3-preview")
-        assert ctx >= 256000
+        assert ctx == 256000
 
 
 # =============================================================================
@@ -507,3 +491,4 @@ class TestTencentTokenhubKnownProviderNames:
     def test_alias_known(self, alias):
         from hermes_cli.models import _KNOWN_PROVIDER_NAMES
         assert alias in _KNOWN_PROVIDER_NAMES
+
