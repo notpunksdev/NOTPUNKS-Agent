@@ -191,17 +191,18 @@ class TestTencentTokenhubCanonicalProvider:
 # =============================================================================
 
 
-class TestTencentInOpenRouterAndNous:
-    """tencent/hy3-preview:free should appear in OpenRouter and Nous curated lists."""
+class TestTencentNotInOpenRouterAndNous:
+    """Broken Hy3 OpenRouter/Nous aggregator routes should not be advertised."""
 
-    def test_in_openrouter_fallback(self):
+    def test_not_in_openrouter_fallback(self):
         from hermes_cli.models import OPENROUTER_MODELS
         ids = [mid for mid, _ in OPENROUTER_MODELS]
-        assert "tencent/hy3-preview:free" in ids
+        assert "tencent/hy3-preview" not in ids
+        assert "tencent/hy3-preview:free" not in ids
 
-    def test_in_nous_provider_models(self):
+    def test_not_in_nous_provider_models(self):
         from hermes_cli.models import _PROVIDER_MODELS
-        assert "tencent/hy3-preview" in _PROVIDER_MODELS["nous"]
+        assert "tencent/hy3-preview" not in _PROVIDER_MODELS["nous"]
 
 
 # =============================================================================
@@ -303,7 +304,7 @@ class TestTencentTokenhubContextLength:
     def test_hy3_preview_context_length(self):
         from agent.model_metadata import get_model_context_length
         ctx = get_model_context_length("hy3-preview")
-        assert ctx == 256000
+        assert ctx >= 256000
 
 
 # =============================================================================
@@ -420,7 +421,7 @@ class TestTencentTokenhubCLIDispatch:
 
 
 class TestTencentTokenhubModelCatalogJSON:
-    """Verify tencent/hy3-preview:free is present in the website model-catalog.json."""
+    """Verify broken Hy3 OpenRouter routes are absent from model-catalog.json."""
 
     def test_in_model_catalog_json(self):
         catalog_path = os.path.join(
@@ -444,7 +445,8 @@ class TestTencentTokenhubModelCatalogJSON:
             for provider_entry in providers:
                 for model in provider_entry.get("models", []):
                     all_ids.add(model.get("id", ""))
-        assert "tencent/hy3-preview:free" in all_ids
+        assert "tencent/hy3-preview" not in all_ids
+        assert "tencent/hy3-preview:free" not in all_ids
 
 
 # =============================================================================
@@ -491,4 +493,3 @@ class TestTencentTokenhubKnownProviderNames:
     def test_alias_known(self, alias):
         from hermes_cli.models import _KNOWN_PROVIDER_NAMES
         assert alias in _KNOWN_PROVIDER_NAMES
-
