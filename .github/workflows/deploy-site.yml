@@ -22,11 +22,18 @@ concurrency:
 
 jobs:
   deploy-vercel:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && vars.VERCEL_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Vercel Deploy
-        run: curl -X POST "${{ secrets.VERCEL_DEPLOY_HOOK }}"
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK" ]; then
+            echo "VERCEL_DEPLOY_HOOK is not configured; skipping Vercel deploy."
+            exit 0
+          fi
+          curl -X POST "$VERCEL_DEPLOY_HOOK"
 
   deploy-docs:
     if: github.repository == 'NousResearch/hermes-agent'
