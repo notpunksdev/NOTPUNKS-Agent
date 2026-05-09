@@ -539,6 +539,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     "POST /api/skills/marketplace/ai-scan",
                     "POST /api/skills/marketplace/wizard-chat",
                     "POST /api/skills/marketplace/wizard-chat/stream",
+                    "POST /api/skills/marketplace/tools/run/stream",
                     "POST /api/skills/marketplace/create-draft",
                     "POST /api/skills/marketplace/publish-draft",
                     "POST /api/skills/marketplace/install",
@@ -616,6 +617,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             "/api/skills/marketplace/ai-scan",
             "/api/skills/marketplace/wizard-chat",
             "/api/skills/marketplace/wizard-chat/stream",
+            "/api/skills/marketplace/tools/run/stream",
             "/api/skills/marketplace/create-draft",
             "/api/skills/marketplace/publish-draft",
             "/api/skills/marketplace/install",
@@ -633,6 +635,9 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             payload, status = _marketplace_skill_wizard_chat(body)
         elif parsed.path == "/api/skills/marketplace/wizard-chat/stream":
             _marketplace_skill_wizard_chat_stream(self, body)
+            return
+        elif parsed.path == "/api/skills/marketplace/tools/run/stream":
+            _marketplace_skill_tool_run_stream(self, body)
             return
         elif parsed.path == "/api/skills/marketplace/create-draft":
             payload, status = _create_marketplace_skill_draft(body)
@@ -1030,6 +1035,114 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
         "missing": [str(item) for item in missing],
         "walletAddress": getattr(ctx, "wallet_address", ""),
     })
+
+
+def _marketplace_skill_tool_run_stream(handler: BaseHTTPRequestHandler, body: dict[str, Any]) -> None:
+    """Run a bundled marketplace skill script and stream visible tool events."""
+    from hermes_cli.skill_marketplace import list_installed_marketplace_skills
+
+    skill_name = str(body.get("skillId") or body.get("name") or "").strip()
+    tool_name = str(body.get("tool") or "token_scan.py").strip()
+    token = str(body.get("token") or body.get("input") or "").strip()
+    if not skill_name:
+        _json_response(handler, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "skillId is required"})
+        return
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\.py", tool_name):
+        _json_response(handler, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "Only bundled Python tools are supported"})
+        return
+    if not token:
+        _json_response(handler, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "token/input is required"})
+        return
+
+    rows = list_installed_marketplace_skills(skill_name)
+    if not rows:
+        _json_response(handler, HTTPStatus.NOT_FOUND, {"ok": False, "error": f"Marketplace skill is not installed locally: {skill_name}"})
+        return
+    row = rows[0]
+    skill_dir = Path(str(row.get("absolutePath") or "")).resolve()
+    script_path = (skill_dir / "scripts" / tool_name).resolve()
+    try:
+        script_path.relative_to(skill_dir)
+    except ValueError:
+        _json_response(handler, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "Tool path escapes skill directory"})
+        return
+    if not script_path.exists() or not script_path.is_file():
+        _json_response(handler, HTTPStatus.NOT_FOUND, {"ok": False, "error": f"Bundled tool not found: scripts/{tool_name}"})
+        return
+
+    timeout = float(os.environ.get("NOTPUNKS_SKILL_TOOL_TIMEOUT", "120"))
+    _stream_response_start(handler)
+    if not _stream_json_event(handler, {
+        "type": "status",
+        "status": "started",
+        "skillId": row.get("skillId") or skill_name,
+        "tool": tool_name,
+        "message": f"Started scripts/{tool_name}",
+    }):
+        return
+
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    cmd = [sys.executable, str(script_path), token, "--pretty"]
+    started = time.monotonic()
+    output_parts: list[str] = []
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(skill_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            bufsize=1,
+        )
+    except Exception as exc:
+        _stream_json_event(handler, {"type": "error", "error": f"Could not start tool: {exc}"})
+        return
+
+    assert proc.stdout is not None
+    try:
+        while True:
+            if time.monotonic() - started > timeout:
+                proc.kill()
+                _stream_json_event(handler, {"type": "error", "error": f"Tool timed out after {int(timeout)}s"})
+                return
+            line = proc.stdout.readline()
+            if line:
+                output_parts.append(line)
+                if not _stream_json_event(handler, {"type": "stdout", "data": line}):
+                    proc.terminate()
+                    return
+                continue
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        remaining = proc.stdout.read()
+        if remaining:
+            output_parts.append(remaining)
+            if not _stream_json_event(handler, {"type": "stdout", "data": remaining}):
+                return
+        rc = int(proc.returncode or 0)
+        output = "".join(output_parts)
+        payload: dict[str, Any] | None = None
+        try:
+            parsed = json.loads(output)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except Exception:
+            payload = None
+        _stream_json_event(handler, {
+            "type": "done" if rc == 0 else "error",
+            "ok": rc == 0,
+            "returncode": rc,
+            "output": output[-20000:],
+            "result": payload,
+        })
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
 
 
 def _require_beta_wallet() -> tuple[Any | None, dict[str, Any] | None]:
