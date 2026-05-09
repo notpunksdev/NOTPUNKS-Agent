@@ -149,6 +149,9 @@ MODEL_ALIASES: dict[str, ModelIdentity] = {
     # Xiaomi
     "mimo":      ModelIdentity("xiaomi", "mimo"),
 
+    # Tencent
+    "hy3":       ModelIdentity("tencent", "hy3"),
+
     # Arcee
     "trinity":   ModelIdentity("arcee-ai", "trinity"),
 }
