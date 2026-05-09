@@ -390,7 +390,7 @@ class TestCmdUpdateLaunchdRestart:
             cmd_update(mock_args)
 
         captured = capsys.readouterr().out
-        assert "Restart manually: hermes gateway run" in captured
+        assert "Restart manually: notpunks gateway run" in captured
 
     @patch("shutil.which", return_value=None)
     @patch("subprocess.run")
@@ -1084,12 +1084,12 @@ class TestGatewayModeWritesExitCodeEarly:
 
 
 class TestCmdUpdateLegacyGatewayWarning:
-    """Tests for the legacy hermes.service warning printed by `hermes update`.
+    """Tests for the legacy hermes.service warning printed by `notpunks update`.
 
     Users who installed Hermes before the service rename often have a
     dormant ``hermes.service`` that starts flap-fighting the current
     ``hermes-gateway.service`` after PR #5646. Every ``hermes update``
-    should remind them to run ``hermes gateway migrate-legacy`` until
+    should remind them to run ``notpunks gateway migrate-legacy`` until
     they do.
     """
 
@@ -1126,9 +1126,9 @@ class TestCmdUpdateLegacyGatewayWarning:
             cmd_update(mock_args)
 
         captured = capsys.readouterr().out
-        assert "Legacy Hermes gateway unit(s) detected" in captured
+        assert "Legacy gateway unit(s) detected" in captured
         assert "hermes.service" in captured
-        assert "hermes gateway migrate-legacy" in captured
+        assert "notpunks gateway migrate-legacy" in captured
         assert "(user scope)" in captured
 
     @patch("shutil.which", return_value=None)
@@ -1258,6 +1258,6 @@ class TestCmdUpdateLegacyGatewayWarning:
             cmd_update(mock_args)
 
         captured = capsys.readouterr().out
-        assert "Legacy Hermes gateway" in captured
+        assert "Legacy gateway" in captured
         assert "(system scope)" in captured
         assert "sudo" in captured

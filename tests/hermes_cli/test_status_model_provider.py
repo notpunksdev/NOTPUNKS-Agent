@@ -63,7 +63,7 @@ def test_show_status_displays_legacy_string_model_and_custom_endpoint(monkeypatc
     assert "Provider:     Custom endpoint" in out
 
 
-def test_show_status_reports_managed_nous_features(monkeypatch, capsys, tmp_path):
+def test_show_status_omits_managed_nous_features_for_notpunks(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr("hermes_cli.status.managed_nous_tools_enabled", lambda: True)
     from hermes_cli import status as status_mod
 
@@ -98,9 +98,9 @@ def test_show_status_reports_managed_nous_features(monkeypatch, capsys, tmp_path
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
 
     out = capsys.readouterr().out
-    assert "Nous Tool Gateway" in out
-    assert "Browser automation" in out
-    assert "active via Nous subscription" in out
+    assert "Nous Tool Gateway" not in out
+    assert "Browser automation" not in out
+    assert "active via Nous subscription" not in out
 
 
 def test_show_status_hides_nous_subscription_section_when_feature_flag_is_off(monkeypatch, capsys, tmp_path):

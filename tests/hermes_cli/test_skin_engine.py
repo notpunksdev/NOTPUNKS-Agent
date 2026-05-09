@@ -37,7 +37,7 @@ class TestSkinConfig:
     def test_get_branding_with_fallback(self):
         from hermes_cli.skin_engine import load_skin
         skin = load_skin("default")
-        assert skin.get_branding("agent_name") == "Hermes Agent"
+        assert skin.get_branding("agent_name") == "NOTPUNKS Agent"
         assert skin.get_branding("nonexistent", "fallback") == "fallback"
 
     def test_get_spinner_wings_empty_for_default(self):
@@ -150,25 +150,25 @@ class TestSkinManagement:
     def test_init_skin_from_empty_config(self):
         from hermes_cli.skin_engine import init_skin_from_config, get_active_skin_name
         init_skin_from_config({})
-        assert get_active_skin_name() == "default"
+        assert get_active_skin_name() == "notpunks"
 
     def test_init_skin_from_null_display(self):
         """display: null should fall back to default, not crash."""
         from hermes_cli.skin_engine import init_skin_from_config, get_active_skin_name
         init_skin_from_config({"display": None})
-        assert get_active_skin_name() == "default"
+        assert get_active_skin_name() == "notpunks"
 
     def test_init_skin_from_non_dict_display(self):
         """display: <non-dict> should fall back to default."""
         from hermes_cli.skin_engine import init_skin_from_config, get_active_skin_name
         init_skin_from_config({"display": "invalid"})
-        assert get_active_skin_name() == "default"
+        assert get_active_skin_name() == "notpunks"
 
         init_skin_from_config({"display": 42})
-        assert get_active_skin_name() == "default"
+        assert get_active_skin_name() == "notpunks"
 
         init_skin_from_config({"display": []})
-        assert get_active_skin_name() == "default"
+        assert get_active_skin_name() == "notpunks"
 
 
 class TestUserSkins:

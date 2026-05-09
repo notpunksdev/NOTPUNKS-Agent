@@ -40,11 +40,11 @@ def test_show_status_termux_gateway_section_skips_systemctl(monkeypatch, capsys,
 
     output = capsys.readouterr().out
     assert "Manager:      Termux / manual process" in output
-    assert "Start with:   hermes gateway" in output
+    assert "Start with:   notpunks gateway" in output
     assert "systemd (user)" not in output
 
 
-def test_show_status_reports_nous_auth_error(monkeypatch, capsys, tmp_path):
+def test_show_status_omits_legacy_nous_auth_block(monkeypatch, capsys, tmp_path):
     from hermes_cli import status as status_mod
     import hermes_cli.auth as auth_mod
     import hermes_cli.gateway as gateway_mod
@@ -75,7 +75,6 @@ def test_show_status_reports_nous_auth_error(monkeypatch, capsys, tmp_path):
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
 
     output = capsys.readouterr().out
-    assert "Nous Portal   ✗ not logged in (run: hermes auth add nous --type oauth)" in output
-    assert "Error:      Refresh session has been revoked" in output
-    assert "Access exp:" in output
-    assert "Key exp:" in output
+    assert "OpenAI Codex" in output
+    assert "Nous Portal" not in output
+    assert "Refresh session has been revoked" not in output
