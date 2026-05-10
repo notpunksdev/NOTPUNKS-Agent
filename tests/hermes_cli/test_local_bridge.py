@@ -669,7 +669,7 @@ def test_local_bridge_skill_wizard_chat_falls_back_when_agent_times_out(monkeypa
             body={
                 "action": "chat",
                 "language": "ru",
-                "messages": [{"role": "user", "content": "торговля на полимаркете"}],
+                "messages": [{"role": "user", "content": "скилл для управления капиталом через https://www.farm.notpunks.com/"}],
             },
             origin="https://skilzzz.com",
         )
@@ -677,8 +677,10 @@ def test_local_bridge_skill_wizard_chat_falls_back_when_agent_times_out(monkeypa
         assert payload["ok"] is True
         assert payload["done"] is False
         assert payload["agentFallback"] is True
-        assert "продолжаем диалог здесь" in payload["reply"]
-        assert "полимаркете" in payload["reply"]
+        assert "запасной ответ bridge" in payload["reply"]
+        assert "farm.notpunks.com" in payload["reply"]
+        assert "APY" in payload["reply"]
+        assert "Polymarket" not in payload["reply"]
         assert payload["walletAddress"] == "EQcreator"
     finally:
         handle.stop()
@@ -715,7 +717,8 @@ def test_local_bridge_skill_wizard_chat_falls_back_on_empty_agent_reply(monkeypa
         assert payload["ok"] is True
         assert payload["done"] is False
         assert payload["agentFallback"] is True
-        assert "continue in the interface" in payload["reply"]
+        assert "bridge fallback" in payload["reply"]
+        assert "model response" in payload["reply"]
     finally:
         handle.stop()
 

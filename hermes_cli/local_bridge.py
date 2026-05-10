@@ -980,6 +980,54 @@ def _wizard_last_user_message(body: dict[str, Any]) -> str:
     return ""
 
 
+def _wizard_fallback_questions(topic: str, *, ru: bool) -> list[str]:
+    lower = topic.lower()
+    capital_intent = any(marker in lower for marker in (
+        "capital",
+        "farm.notpunks",
+        "farm",
+        "yield",
+        "staking",
+        "ликвид",
+        "капитал",
+        "фарм",
+        "фарминг",
+        "стейк",
+        "доход",
+    ))
+    if ru and capital_intent:
+        return [
+            "1. Skill должен только анализировать позиции и доходность или также готовить действия для кошелька?",
+            "2. Какие данные ему можно читать: balances, staking/farm позиции, APY, rewards, историю транзакций, цены токенов?",
+            "3. Какие действия разрешены: только рекомендации, подготовка транзакций на подтверждение, ребалансировка, claim rewards, exit из позиции?",
+            "4. Какие риск-лимиты нужны: максимальная доля в одном пуле, минимальный остаток TON, запрет автоподписи, стоп-условия?",
+            "5. Какой результат считать успешным: dashboard капитала, план ребаланса, risk report, список транзакций на подтверждение?",
+        ]
+    if capital_intent:
+        return [
+            "1. Should the skill only analyze positions and yield, or also prepare wallet actions?",
+            "2. Which data may it read: balances, staking/farm positions, APY, rewards, transaction history, token prices?",
+            "3. Which actions are allowed: recommendations only, transaction drafts for approval, rebalancing, claiming rewards, exiting positions?",
+            "4. Which risk limits are required: max share per pool, minimum TON reserve, no auto-signing, stop conditions?",
+            "5. What counts as success: capital dashboard, rebalance plan, risk report, or transaction list for approval?",
+        ]
+    if ru:
+        return [
+            "1. Что skill должен делать сам, а что только рекомендовать пользователю?",
+            "2. Какие входные данные, сайты, API, файлы или tools ему разрешены?",
+            "3. Какие действия требуют явного подтверждения пользователя?",
+            "4. Какие ограничения риска, приватности и безопасности обязательны?",
+            "5. Какой результат считать успешным: отчет, чеклист, готовый draft, автоматизация или набор следующих действий?",
+        ]
+    return [
+        "1. What should the skill do autonomously, and what should it only recommend?",
+        "2. Which inputs, websites, APIs, files, or tools may it use?",
+        "3. Which actions require explicit user confirmation?",
+        "4. Which risk, privacy, and security boundaries are required?",
+        "5. What counts as success: report, checklist, draft, automation, or next-action plan?",
+    ]
+
+
 def _wizard_fallback_response(body: dict[str, Any], ctx: Any, reason: str) -> tuple[dict[str, Any], int]:
     language = str(body.get("language") or "en").strip().lower()
     action = str(body.get("action") or "chat").strip().lower()
@@ -988,35 +1036,30 @@ def _wizard_fallback_response(body: dict[str, Any], ctx: Any, reason: str) -> tu
     ru = language.startswith("ru")
     topic_ru = topic or "этого Skill NFT"
     topic_en = topic or "this Skill NFT"
+    questions = "\n".join(_wizard_fallback_questions(topic, ru=ru))
 
     if ru and action == "generate":
         reply = (
             "Локальный агент не успел сформировать финальный SKILL.md. "
-            "Продолжаем через интерфейс: добавьте, пожалуйста, недостающие детали по назначению skill, "
+            "Это запасной ответ bridge, не ответ модели. Добавьте недостающие детали по назначению skill, "
             "разрешенным инструментам, ограничениям риска и критерию успешной проверки."
         )
     elif ru:
         reply = (
-            f"Локальный агент не ответил вовремя, поэтому продолжаем диалог здесь. "
+            "Локальный агент не ответил вовремя. Это запасной ответ bridge, не ответ модели.\n\n"
             f"Для Skill NFT про «{topic_ru}» уточните:\n"
-            "1. Skill должен только анализировать рынки или также готовить/исполнять сделки?\n"
-            "2. Какие источники и инструменты ему разрешены: Polymarket API, браузер, кошелек, уведомления?\n"
-            "3. Какие ограничения риска нужны: лимит ставки, запрет автосделок, рынки, стоп-условия?\n"
-            "4. Какой результат считать успешным: тезис сделки, план ордера, мониторинг или отчет?"
+            f"{questions}"
         )
     elif action == "generate":
         reply = (
             "The local agent did not finish generating the final SKILL.md in time. "
-            "Continue in the interface by adding the skill purpose, allowed tools, risk boundaries, and success criteria."
+            "This is a bridge fallback, not a model response. Add the skill purpose, allowed tools, risk boundaries, and success criteria."
         )
     else:
         reply = (
-            f"The local agent did not answer in time, so we will continue in the interface. "
+            "The local agent did not answer in time. This is a bridge fallback, not a model response.\n\n"
             f"For the Skill NFT about \"{topic_en}\", please clarify:\n"
-            "1. Should the skill only analyze markets, or also prepare/execute trades?\n"
-            "2. Which sources and tools are allowed: Polymarket API, browser, wallet, notifications?\n"
-            "3. What risk limits are required: stake cap, no auto-trading, markets, stop conditions?\n"
-            "4. What counts as success: trade thesis, order plan, monitoring, or report?"
+            f"{questions}"
         )
     return {
         "ok": True,
