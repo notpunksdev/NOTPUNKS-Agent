@@ -865,108 +865,6 @@ def _run_skill_wizard_agent_with_progress(prompt: str, on_progress: Callable[[st
     return (stdout or "").strip()
 
 
-def _json_string_prefix_value(source: str, key: str) -> str:
-    """Best-effort decode of a JSON string field while the model is still streaming."""
-    marker = f'"{key}"'
-    start = source.find(marker)
-    if start < 0:
-        return ""
-    colon = source.find(":", start + len(marker))
-    if colon < 0:
-        return ""
-    quote = source.find('"', colon + 1)
-    if quote < 0:
-        return ""
-
-    value: list[str] = []
-    escaped = False
-    index = quote + 1
-    while index < len(source):
-        char = source[index]
-        if escaped:
-            if char == "n":
-                value.append("\n")
-            elif char == "r":
-                value.append("\r")
-            elif char == "t":
-                value.append("\t")
-            elif char == "u" and index + 4 < len(source):
-                code = source[index + 1:index + 5]
-                try:
-                    value.append(chr(int(code, 16)))
-                    index += 4
-                except ValueError:
-                    value.append("\\u" + code)
-            else:
-                value.append(char)
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        elif char == '"':
-            break
-        else:
-            value.append(char)
-        index += 1
-    return "".join(value)
-
-
-def _run_skill_wizard_agent_streaming(
-    prompt: str,
-    *,
-    on_status: Callable[[str], bool],
-    on_delta: Callable[[str], bool],
-) -> str:
-    """Call the configured model directly and stream the JSON reply field as it appears."""
-    timeout = _skill_wizard_timeout_seconds()
-    try:
-        from agent.auxiliary_client import _read_main_model, _read_main_provider, resolve_provider_client
-    except Exception as exc:
-        raise RuntimeError(f"Streaming client is unavailable: {exc}") from exc
-
-    provider = _read_main_provider()
-    configured_model = _read_main_model() or None
-    if not provider:
-        raise RuntimeError("Streaming requires a configured model provider")
-    client, model = resolve_provider_client(provider, model=configured_model)
-    if client is None or not model:
-        raise RuntimeError("Configured model/API key is not available")
-
-    raw = ""
-    emitted_reply = ""
-    started = time.monotonic()
-    if not on_status("thinking"):
-        raise RuntimeError("Wizard stream was closed by the browser")
-    stream = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=2500,
-        stream=True,
-        timeout=timeout,
-    )
-    for chunk in stream:
-        if time.monotonic() - started >= timeout:
-            raise SkillWizardAgentTimeout(f"Local agent did not answer within {int(timeout)}s")
-        delta = ""
-        try:
-            delta = chunk.choices[0].delta.content or ""
-        except Exception:
-            try:
-                delta = chunk.choices[0].message.content or ""
-            except Exception:
-                delta = ""
-        if not delta:
-            continue
-        raw += delta
-        reply_prefix = _json_string_prefix_value(raw, "reply")
-        if len(reply_prefix) > len(emitted_reply):
-            next_delta = reply_prefix[len(emitted_reply):]
-            emitted_reply = reply_prefix
-            if next_delta and not on_delta(next_delta):
-                raise RuntimeError("Wizard stream was closed by the browser")
-    return raw.strip()
-
-
 def _wizard_last_user_message(body: dict[str, Any]) -> str:
     messages = body.get("messages") if isinstance(body.get("messages"), list) else []
     for item in reversed(messages):
@@ -1142,39 +1040,20 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
         return
 
     try:
-        streamed_any_reply = False
-
-        def _on_delta(delta: str) -> bool:
-            nonlocal streamed_any_reply
-            streamed_any_reply = True
-            return _stream_json_event(handler, {"type": "delta", "delta": delta})
-
-        raw = _run_skill_wizard_agent_streaming(
+        raw = _run_skill_wizard_agent_with_progress(
             prompt,
-            on_status=lambda status: _stream_json_event(handler, {"type": "status", "status": status}),
-            on_delta=_on_delta,
+            lambda status: _stream_json_event(handler, {"type": "status", "status": status}),
         )
     except SkillWizardAgentTimeout as exc:
         payload, _status = _wizard_fallback_response(body, ctx, str(exc))
         _stream_wizard_reply(handler, payload)
         return
-    except Exception:
-        try:
-            raw = _run_skill_wizard_agent_with_progress(
-                prompt,
-                lambda status: _stream_json_event(handler, {"type": "status", "status": status}),
-            )
-            streamed_any_reply = False
-        except SkillWizardAgentTimeout as exc:
-            payload, _status = _wizard_fallback_response(body, ctx, str(exc))
-            _stream_wizard_reply(handler, payload)
-            return
-        except Exception as exc:
-            _stream_json_event(handler, {
-                "type": "error",
-                "error": f"Local agent LLM call failed: {exc}",
-            })
-            return
+    except Exception as exc:
+        _stream_json_event(handler, {
+            "type": "error",
+            "error": f"Local agent LLM call failed: {exc}",
+        })
+        return
 
     parsed = raw if isinstance(raw, dict) else _extract_json_object(raw)
     draft = _normalize_wizard_draft(parsed.get("draft"))
@@ -1187,18 +1066,14 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
     if action == "generate" and not str(draft.get("instructions") or "").strip() and _looks_like_skill_instruction(reply):
         draft["instructions"] = reply
     missing = parsed.get("missing") if isinstance(parsed.get("missing"), list) else []
-    payload = {
+    _stream_wizard_reply(handler, {
         "ok": True,
         "reply": reply,
         "done": bool(parsed.get("done")),
         "draft": draft,
         "missing": [str(item) for item in missing],
         "walletAddress": getattr(ctx, "wallet_address", ""),
-    }
-    if streamed_any_reply:
-        _stream_json_event(handler, {"type": "done", "response": payload})
-    else:
-        _stream_wizard_reply(handler, payload)
+    })
 
 
 def _require_beta_wallet() -> tuple[Any | None, dict[str, Any] | None]:
