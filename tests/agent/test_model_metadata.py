@@ -497,6 +497,19 @@ class TestGetModelContextLength:
         assert get_model_context_length("qwen3-plus") == 131072
 
     @patch("agent.model_metadata.fetch_model_metadata")
+    def test_nous_kimi_ignores_stale_low_openrouter_context(self, mock_fetch):
+        """Nous Kimi K2.6 must not inherit a stale 32K OpenRouter cache entry."""
+        mock_fetch.return_value = {
+            "moonshotai/kimi-k2.6": {"context_length": 32768},
+        }
+        assert get_model_context_length("moonshotai/kimi-k2.6", provider="nous") == 262144
+
+    @patch("agent.model_metadata.fetch_model_metadata")
+    def test_default_context_match_is_case_insensitive(self, mock_fetch):
+        mock_fetch.return_value = {}
+        assert get_model_context_length("moonshotai/Kimi-K2.6") == 262144
+
+    @patch("agent.model_metadata.fetch_model_metadata")
     def test_api_missing_context_length_key(self, mock_fetch):
         """Model in API but without context_length → defaults to the top
         probe tier (currently 256K)."""

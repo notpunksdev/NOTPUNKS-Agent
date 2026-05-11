@@ -250,6 +250,29 @@ DEFAULT_CONTEXT_LENGTHS = {
     "zai-org/GLM-5": 202752,
 }
 
+def _lookup_default_context_length(model: str) -> Optional[int]:
+    """Return a hardcoded family fallback for *model*, case-insensitively."""
+    model_lower = (model or "").lower()
+    for default_model, length in sorted(
+        DEFAULT_CONTEXT_LENGTHS.items(), key=lambda x: len(x[0]), reverse=True
+    ):
+        if default_model.lower() in model_lower:
+            return length
+    return None
+
+
+def _prefer_default_when_detected_too_small(model: str, detected: Optional[int]) -> Optional[int]:
+    """Avoid stale provider metadata below NOTPUNKS' minimum for known families."""
+    fallback = _lookup_default_context_length(model)
+    if (
+        fallback is not None
+        and fallback >= MINIMUM_CONTEXT_LENGTH
+        and (detected is None or detected < MINIMUM_CONTEXT_LENGTH)
+    ):
+        return fallback
+    return detected
+
+
 _CONTEXT_LENGTH_KEYS = (
     "context_length",
     "context_window",
@@ -1234,14 +1257,17 @@ def _resolve_nous_context_length(model: str) -> Optional[int]:
     metadata = fetch_model_metadata()  # OpenRouter cache
     # Exact match first
     if model in metadata:
-        return metadata[model].get("context_length")
+        return _prefer_default_when_detected_too_small(
+            model,
+            metadata[model].get("context_length"),
+        )
 
     normalized = _normalize_model_version(model).lower()
 
     for or_id, entry in metadata.items():
         bare = or_id.split("/", 1)[1] if "/" in or_id else or_id
         if bare.lower() == model.lower() or _normalize_model_version(bare).lower() == normalized:
-            return entry.get("context_length")
+            return _prefer_default_when_detected_too_small(model, entry.get("context_length"))
 
     # Partial prefix match for cases like gemini-3-flash → gemini-3-flash-preview
     # Require match to be at a word boundary (followed by -, :, or end of string)
@@ -1252,7 +1278,7 @@ def _resolve_nous_context_length(model: str) -> Optional[int]:
             if candidate.startswith(query) and (
                 len(candidate) == len(query) or candidate[len(query)] in "-:."
             ):
-                return entry.get("context_length")
+                return _prefer_default_when_detected_too_small(model, entry.get("context_length"))
 
     return None
 
@@ -1439,12 +1465,9 @@ def get_model_context_length(
     # Only check `default_model in model` (is the key a substring of the input).
     # The reverse (`model in default_model`) causes shorter names like
     # "claude-sonnet-4" to incorrectly match "claude-sonnet-4-6" and return 1M.
-    model_lower = model.lower()
-    for default_model, length in sorted(
-        DEFAULT_CONTEXT_LENGTHS.items(), key=lambda x: len(x[0]), reverse=True
-    ):
-        if default_model in model_lower:
-            return length
+    default_context = _lookup_default_context_length(model)
+    if default_context:
+        return default_context
 
     # 9. Query local server as last resort
     if base_url and is_local_endpoint(base_url):
