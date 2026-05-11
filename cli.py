@@ -6130,6 +6130,7 @@ class HermesCLI:
             approve_install_request,
             deny_pairing_request,
             deny_install_request,
+            execute_approved_install_request,
             list_pairing_requests,
             list_install_requests,
             local_bridge_config,
@@ -6317,6 +6318,11 @@ class HermesCLI:
             if action == "approve":
                 mode = str(request.get("mode") or "install").strip()
                 action_label = "uninstall" if mode == "uninstall" else "install"
+                if mode == "uninstall":
+                    executed = execute_approved_install_request(request_id)
+                    if executed and executed.get("status") == "completed":
+                        _cprint(f"  Approved and completed marketplace {action_label} request {request_id}: {request.get('name', '')}")
+                        return
                 _cprint(f"  Approved marketplace {action_label} request {request_id}: {request.get('name', '')}")
                 _cprint("  Return to skilzzz.com; the action will continue automatically.")
             else:
@@ -6335,6 +6341,7 @@ class HermesCLI:
             approve_pairing_request,
             deny_install_request,
             deny_pairing_request,
+            execute_approved_install_request,
             get_install_request,
             get_pairing_request,
         )
@@ -6482,8 +6489,16 @@ class HermesCLI:
         if str(answer or "").strip().lower() in {"y", "yes"}:
             approved = approve_install_request(request_id)
             if approved:
-                _cprint(f"  Approved marketplace {action_label} request {request_id}: {name}")
-                _cprint("  Return to skilzzz.com; the action will continue automatically.")
+                if mode == "uninstall":
+                    executed = execute_approved_install_request(request_id)
+                    if executed and executed.get("status") == "completed":
+                        _cprint(f"  Approved and completed marketplace {action_label} request {request_id}: {name}")
+                    else:
+                        _cprint(f"  Approved marketplace {action_label} request {request_id}: {name}")
+                        _cprint("  Return to skilzzz.com; the action will continue automatically.")
+                else:
+                    _cprint(f"  Approved marketplace {action_label} request {request_id}: {name}")
+                    _cprint("  Return to skilzzz.com; the action will continue automatically.")
             else:
                 _cprint(f"  Approval request not found or expired: {request_id}")
         else:

@@ -1283,6 +1283,72 @@ def test_local_bridge_uninstall_marketplace_skill(monkeypatch):
         assert payload["uninstalled"]["skillId"] == "alpha"
         assert payload["status"] is None
         assert calls == ["alpha"]
+
+        status, _headers, status_payload = _request(
+            handle.port,
+            "GET",
+            f"/api/skills/marketplace/install-requests/{request_id}",
+        )
+        assert status == 200
+        assert status_payload["request"]["status"] == "completed"
+        assert status_payload["request"]["result"]["ok"] is True
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_executes_approved_uninstall_request(monkeypatch):
+    import hermes_cli.skill_marketplace as skill_marketplace
+    from hermes_cli.local_bridge import approve_install_request, execute_approved_install_request, start_local_bridge
+
+    calls = []
+    monkeypatch.setattr(skill_marketplace, "uninstall_marketplace_skill", lambda name: calls.append(name) or {
+        "name": name,
+        "skillId": name,
+        "path": name,
+        "message": f"Uninstalled {name}",
+    })
+    monkeypatch.setattr(skill_marketplace, "list_installed_marketplace_skills", lambda name="": [])
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "DELETE",
+            "/api/skills/marketplace/install",
+            body={
+                "name": "alpha",
+                "walletAddress": "EQwallet",
+                "requireWalletSignature": True,
+                "walletSignature": _opaque_install_signature(mode="uninstall"),
+            },
+        )
+        assert status == 202
+        request_id = payload["requestId"]
+        assert approve_install_request(request_id)["status"] == "approved"
+
+        executed = execute_approved_install_request(request_id)
+        assert executed is not None
+        assert executed["status"] == "completed"
+        assert executed["result"]["ok"] is True
+        assert calls == ["alpha"]
+
+        status, _headers, payload = _request(
+            handle.port,
+            "DELETE",
+            "/api/skills/marketplace/install",
+            body={
+                "name": "alpha",
+                "requestId": request_id,
+                "walletAddress": "EQwallet",
+                "requireWalletSignature": True,
+                "walletSignature": _opaque_install_signature(mode="uninstall"),
+            },
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["uninstalled"]["skillId"] == "alpha"
+        assert calls == ["alpha"]
     finally:
         handle.stop()
 

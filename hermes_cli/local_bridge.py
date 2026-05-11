@@ -765,6 +765,23 @@ def get_install_request(request_id: str) -> dict[str, Any] | None:
         return dict(request)
 
 
+def execute_approved_install_request(request_id: str) -> dict[str, Any] | None:
+    request = get_install_request(request_id)
+    if not request or request.get("status") != "approved":
+        return request
+    mode = str(request.get("mode") or "install").strip()
+    if mode == "uninstall":
+        body = {**request, "requestId": request_id}
+        payload, _status = _uninstall_marketplace_skill(body)
+    else:
+        body = {**request, "requestId": request_id}
+        payload, _status = _install_marketplace_skill(body, origin=str(request.get("origin") or ""))
+    completed = get_install_request(request_id)
+    if completed and completed.get("status") in {"completed", "failed"}:
+        return completed
+    return payload if isinstance(payload, dict) else request
+
+
 class _BridgeHandler(BaseHTTPRequestHandler):
     server_version = "NOTPUNKSLocalBridge/1.0"
 
@@ -1958,6 +1975,10 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
         request = dict(_PENDING_INSTALLS.get(request_id) or {})
     if not request:
         return {"ok": False, "error": "Install approval request not found or expired"}, HTTPStatus.NOT_FOUND
+    if request.get("status") == "completed" and isinstance(request.get("result"), dict):
+        return dict(request["result"]), HTTPStatus.OK
+    if request.get("status") == "failed":
+        return {"ok": False, "error": str(request.get("error") or "Install approval request failed")}, HTTPStatus.INTERNAL_SERVER_ERROR
     if request.get("status") == "denied":
         return {"ok": False, "error": "Install approval request was denied"}, HTTPStatus.FORBIDDEN
     if request.get("status") != "approved":
@@ -2045,15 +2066,36 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
         )
     except Exception as exc:
         message = str(exc)
+        with _PENDING_LOCK:
+            _load_pending_unlocked()
+            failed = _PENDING_INSTALLS.get(request_id)
+            if failed:
+                failed["status"] = "failed"
+                failed["failed_at"] = time.time()
+                failed["error"] = message
+                _save_pending_unlocked()
         _notify_install_result(request_id, skill_name, ok=False, message=message)
         if "Security scan blocked install" in message and not bool(body.get("force")):
             return {"ok": False, "error": message}, HTTPStatus.CONFLICT
         return {"ok": False, "error": message}, HTTPStatus.INTERNAL_SERVER_ERROR
 
     status_rows = list_installed_marketplace_skills(str(result.get("name") or skill_name))
+    response_payload = {
+        "ok": True,
+        "mode": mode,
+        "walletAddress": requested_wallet,
+        "metadataUrl": metadata_url,
+        "expectedBundleHash": expected_bundle_hash,
+        "installed": result,
+        "status": status_rows[0] if status_rows else None,
+    }
     with _PENDING_LOCK:
         _load_pending_unlocked()
-        _PENDING_INSTALLS.pop(request_id, None)
+        completed = _PENDING_INSTALLS.get(request_id)
+        if completed:
+            completed["status"] = "completed"
+            completed["completed_at"] = time.time()
+            completed["result"] = response_payload
         _save_pending_unlocked()
     _notify_install_result(
         request_id,
@@ -2062,15 +2104,7 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
         message=f"Installed {result.get('name') or skill_name}",
         installed=result,
     )
-    return {
-        "ok": True,
-        "mode": mode,
-        "walletAddress": requested_wallet,
-        "metadataUrl": metadata_url,
-        "expectedBundleHash": expected_bundle_hash,
-        "installed": result,
-        "status": status_rows[0] if status_rows else None,
-    }, HTTPStatus.OK
+    return response_payload, HTTPStatus.OK
 
 
 def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], int]:
@@ -2118,6 +2152,10 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
         request = dict(_PENDING_INSTALLS.get(request_id) or {})
     if not request:
         return {"ok": False, "error": "Uninstall approval request not found or expired"}, HTTPStatus.NOT_FOUND
+    if request.get("status") == "completed" and isinstance(request.get("result"), dict):
+        return dict(request["result"]), HTTPStatus.OK
+    if request.get("status") == "failed":
+        return {"ok": False, "error": str(request.get("error") or "Uninstall approval request failed")}, HTTPStatus.INTERNAL_SERVER_ERROR
     if request.get("status") == "denied":
         return {"ok": False, "error": "Uninstall approval request was denied"}, HTTPStatus.FORBIDDEN
     if request.get("status") != "approved":
@@ -2144,25 +2182,46 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
     try:
         result = uninstall_marketplace_skill(skill_name)
     except FileNotFoundError as exc:
+        with _PENDING_LOCK:
+            _load_pending_unlocked()
+            failed = _PENDING_INSTALLS.get(request_id)
+            if failed:
+                failed["status"] = "failed"
+                failed["failed_at"] = time.time()
+                failed["error"] = str(exc)
+                _save_pending_unlocked()
         _notify_install_result(request_id, skill_name, ok=False, message=str(exc))
         return {"ok": False, "error": str(exc)}, HTTPStatus.NOT_FOUND
     except Exception as exc:
+        with _PENDING_LOCK:
+            _load_pending_unlocked()
+            failed = _PENDING_INSTALLS.get(request_id)
+            if failed:
+                failed["status"] = "failed"
+                failed["failed_at"] = time.time()
+                failed["error"] = str(exc)
+                _save_pending_unlocked()
         _notify_install_result(request_id, skill_name, ok=False, message=str(exc))
         return {"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR
 
     status_rows = list_installed_marketplace_skills(str(result.get("skillId") or skill_name))
-    with _PENDING_LOCK:
-        _load_pending_unlocked()
-        _PENDING_INSTALLS.pop(request_id, None)
-        _save_pending_unlocked()
-    _notify_install_result(request_id, skill_name, ok=True, message=f"Uninstalled {skill_name}")
-    return {
+    response_payload = {
         "ok": True,
         "mode": "uninstall",
         "walletAddress": requested_wallet,
         "uninstalled": result,
         "status": status_rows[0] if status_rows else None,
-    }, HTTPStatus.OK
+    }
+    with _PENDING_LOCK:
+        _load_pending_unlocked()
+        completed = _PENDING_INSTALLS.get(request_id)
+        if completed:
+            completed["status"] = "completed"
+            completed["completed_at"] = time.time()
+            completed["result"] = response_payload
+        _save_pending_unlocked()
+    _notify_install_result(request_id, skill_name, ok=True, message=f"Uninstalled {skill_name}")
+    return response_payload, HTTPStatus.OK
 
 
 def _port_is_available(host: str, port: int) -> bool:
