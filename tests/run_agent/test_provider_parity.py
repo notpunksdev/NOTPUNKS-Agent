@@ -970,6 +970,22 @@ class TestProviderRouting:
         kwargs = agent._build_api_kwargs([{"role": "user", "content": "hi"}])
         assert kwargs["extra_body"]["provider"]["order"] == ["anthropic", "together"]
 
+    def test_kimi_k26_routes_away_from_32k_io_net(self, monkeypatch):
+        agent = _make_agent(monkeypatch, "openrouter", model="moonshotai/kimi-k2.6")
+        kwargs = agent._build_api_kwargs([{"role": "user", "content": "hi"}])
+        provider = kwargs["extra_body"]["provider"]
+        assert provider["order"][0] == "Moonshot AI"
+        assert "DeepInfra" in provider["order"]
+        assert "Io Net" in provider["ignore"]
+        assert provider["allow_fallbacks"] is True
+
+    def test_kimi_k26_respects_explicit_io_net_choice(self, monkeypatch):
+        agent = _make_agent(monkeypatch, "openrouter", model="moonshotai/kimi-k2.6")
+        agent.providers_order = ["Io Net"]
+        kwargs = agent._build_api_kwargs([{"role": "user", "content": "hi"}])
+        assert kwargs["extra_body"]["provider"]["order"] == ["Io Net"]
+        assert "ignore" not in kwargs["extra_body"]["provider"]
+
     def test_require_parameters(self, monkeypatch):
         agent = _make_agent(monkeypatch, "openrouter")
         agent.provider_require_parameters = True

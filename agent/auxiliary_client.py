@@ -2917,6 +2917,18 @@ def _build_call_kwargs(
 
     # Provider-specific extra_body
     merged_extra = dict(extra_body or {})
+    if provider == "openrouter" or base_url_host_matches(base_url or "", "openrouter.ai"):
+        try:
+            from agent.openrouter_routing import apply_openrouter_model_routing
+
+            routed_provider = apply_openrouter_model_routing(
+                model,
+                merged_extra.get("provider") if isinstance(merged_extra.get("provider"), dict) else None,
+            )
+            if routed_provider:
+                merged_extra["provider"] = routed_provider
+        except Exception:
+            pass
     if provider == "nous" or auxiliary_is_nous:
         merged_extra.setdefault("tags", []).extend(["product=hermes-agent"])
     if merged_extra:

@@ -2716,6 +2716,31 @@ class AIAgent:
         """Return True when the base URL targets OpenRouter."""
         return base_url_host_matches(self._base_url_lower, "openrouter.ai")
 
+    def _openrouter_provider_preferences(self) -> Dict[str, Any]:
+        """Build OpenRouter provider routing preferences for this model."""
+        prefs: Dict[str, Any] = {}
+        if self.providers_allowed:
+            prefs["only"] = self.providers_allowed
+        if self.providers_ignored:
+            prefs["ignore"] = self.providers_ignored
+        if self.providers_order:
+            prefs["order"] = self.providers_order
+        if self.provider_sort:
+            prefs["sort"] = self.provider_sort
+        if self.provider_require_parameters:
+            prefs["require_parameters"] = True
+        if self.provider_data_collection:
+            prefs["data_collection"] = self.provider_data_collection
+
+        if self._is_openrouter_url():
+            try:
+                from agent.openrouter_routing import apply_openrouter_model_routing
+
+                prefs = apply_openrouter_model_routing(self.model, prefs)
+            except Exception:
+                pass
+        return prefs
+
     def _anthropic_prompt_cache_policy(
         self,
         *,
@@ -7928,19 +7953,7 @@ class AIAgent:
             _fixed_temp = None
 
         # Provider preferences (OpenRouter-specific)
-        _prefs: Dict[str, Any] = {}
-        if self.providers_allowed:
-            _prefs["only"] = self.providers_allowed
-        if self.providers_ignored:
-            _prefs["ignore"] = self.providers_ignored
-        if self.providers_order:
-            _prefs["order"] = self.providers_order
-        if self.provider_sort:
-            _prefs["sort"] = self.provider_sort
-        if self.provider_require_parameters:
-            _prefs["require_parameters"] = True
-        if self.provider_data_collection:
-            _prefs["data_collection"] = self.provider_data_collection
+        _prefs = self._openrouter_provider_preferences()
 
         # Anthropic max output for Claude on OpenRouter/Nous
         _ant_max = None
@@ -9583,15 +9596,7 @@ class AIAgent:
                     summary_kwargs.update(self._max_tokens_param(self.max_tokens))
 
                 # Include provider routing preferences
-                provider_preferences = {}
-                if self.providers_allowed:
-                    provider_preferences["only"] = self.providers_allowed
-                if self.providers_ignored:
-                    provider_preferences["ignore"] = self.providers_ignored
-                if self.providers_order:
-                    provider_preferences["order"] = self.providers_order
-                if self.provider_sort:
-                    provider_preferences["sort"] = self.provider_sort
+                provider_preferences = self._openrouter_provider_preferences()
                 if provider_preferences:
                     summary_extra_body["provider"] = provider_preferences
 

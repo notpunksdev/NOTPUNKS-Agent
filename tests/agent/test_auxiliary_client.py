@@ -1079,6 +1079,20 @@ class TestKimiTemperatureOmitted:
 
         assert kwargs["temperature"] == 0.3
 
+    def test_openrouter_kimi_k2_6_routes_away_from_io_net(self):
+        from agent.auxiliary_client import _build_call_kwargs
+
+        kwargs = _build_call_kwargs(
+            provider="openrouter",
+            model="moonshotai/kimi-k2.6",
+            messages=[{"role": "user", "content": "hello"}],
+            base_url="https://openrouter.ai/api/v1",
+        )
+
+        provider = kwargs["extra_body"]["provider"]
+        assert provider["order"][0] == "Moonshot AI"
+        assert "Io Net" in provider["ignore"]
+
     @pytest.mark.parametrize(
         "base_url",
         [
