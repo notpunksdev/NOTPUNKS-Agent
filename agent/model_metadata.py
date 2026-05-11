@@ -1306,8 +1306,14 @@ def get_model_context_length(
     8. Thin hardcoded defaults (broad family patterns)
     9. Default fallback (128K)
     """
-    # 0. Explicit config override — user knows best
+    # 0. Explicit config override — user knows best unless an old low override
+    # conflicts with a known 64K+ cloud model family. This prevents stale
+    # config.yaml values like kimi-k2.6 -> 32768 from blocking startup after
+    # the provider metadata has been corrected.
     if config_context_length is not None and isinstance(config_context_length, int) and config_context_length > 0:
+        preferred = _prefer_default_when_detected_too_small(model, config_context_length)
+        if preferred:
+            return preferred
         return config_context_length
 
     # 0b. custom_providers per-model override — check before any probe.
@@ -1323,6 +1329,9 @@ def get_model_context_length(
                 custom_providers=custom_providers,
             )
             if cp_ctx:
+                preferred = _prefer_default_when_detected_too_small(model, cp_ctx)
+                if preferred:
+                    return preferred
                 return cp_ctx
         except Exception:
             pass  # fall through to probing

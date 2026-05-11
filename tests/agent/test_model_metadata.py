@@ -542,6 +542,26 @@ class TestGetModelContextLength:
             assert get_cached_context_length("moonshotai/kimi-k2.6", "https://openrouter.ai/api/v1") is None
 
     @patch("agent.model_metadata.fetch_model_metadata")
+    def test_stale_low_config_override_is_ignored_for_known_large_context_model(self, mock_fetch):
+        """Known 64K+ model families should not be blocked by stale config overrides."""
+        mock_fetch.return_value = {}
+        assert get_model_context_length(
+            "moonshotai/kimi-k2.6",
+            provider="openrouter",
+            config_context_length=32768,
+        ) == 262144
+
+    @patch("agent.model_metadata.fetch_model_metadata")
+    def test_unknown_low_config_override_is_still_honored(self, mock_fetch):
+        """Unknown/local models can still use explicit low overrides and then fail preflight."""
+        mock_fetch.return_value = {}
+        assert get_model_context_length(
+            "custom-small-model",
+            provider="custom",
+            config_context_length=32768,
+        ) == 32768
+
+    @patch("agent.model_metadata.fetch_model_metadata")
     def test_no_base_url_skips_cache(self, mock_fetch, tmp_path):
         """Without base_url, cache lookup is skipped."""
         mock_fetch.return_value = {}
