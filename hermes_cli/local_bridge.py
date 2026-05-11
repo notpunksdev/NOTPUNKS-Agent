@@ -793,11 +793,11 @@ class SkillWizardAgentTimeout(TimeoutError):
 
 
 def _skill_wizard_timeout_seconds() -> float:
-    raw = os.getenv("NOTPUNKS_SKILL_WIZARD_TIMEOUT", "75")
+    raw = os.getenv("NOTPUNKS_SKILL_WIZARD_TIMEOUT", "180")
     try:
         return max(float(raw), 1.0)
     except ValueError:
-        return 75.0
+        return 180.0
 
 
 def _run_skill_wizard_agent(prompt: str) -> str:
@@ -915,8 +915,9 @@ def _run_skill_wizard_agent_streaming(
     *,
     on_status: Callable[[str], bool],
     on_delta: Callable[[str], bool],
+    on_reasoning: Callable[[str], bool] | None = None,
 ) -> str:
-    """Call the configured model directly and stream the JSON reply field as it appears."""
+    """Call the configured model and stream reasoning plus the JSON reply field."""
     timeout = _skill_wizard_timeout_seconds()
     try:
         from agent.auxiliary_client import _read_main_model, _read_main_provider, resolve_provider_client
@@ -931,22 +932,78 @@ def _run_skill_wizard_agent_streaming(
     if client is None or not model:
         raise RuntimeError("Configured model/API key is not available")
 
+    base_url = str(getattr(client, "base_url", "") or "")
+    extra_body: dict[str, Any] = {}
+    is_openrouter = provider == "openrouter"
+    try:
+        from utils import base_url_host_matches
+
+        is_openrouter = is_openrouter or base_url_host_matches(base_url, "openrouter.ai")
+    except Exception:
+        pass
+    if is_openrouter:
+        try:
+            from agent.openrouter_routing import apply_openrouter_model_routing
+
+            routing = apply_openrouter_model_routing(model, None)
+            if routing:
+                extra_body["provider"] = routing
+        except Exception:
+            pass
+
+    temperature: float | None = 0.2
+    try:
+        from agent.auxiliary_client import OMIT_TEMPERATURE, _fixed_temperature_for_model
+
+        fixed_temperature = _fixed_temperature_for_model(model, base_url)
+        if fixed_temperature is OMIT_TEMPERATURE:
+            temperature = None
+        elif fixed_temperature is not None:
+            temperature = fixed_temperature
+    except Exception:
+        pass
+
     raw = ""
     emitted_reply = ""
     started = time.monotonic()
     if not on_status("thinking"):
         raise RuntimeError("Wizard stream was closed by the browser")
-    stream = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=2500,
-        stream=True,
-        timeout=timeout,
-    )
+    request_kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 2500,
+        "stream": True,
+        "timeout": timeout,
+    }
+    if temperature is not None:
+        request_kwargs["temperature"] = temperature
+    if extra_body:
+        request_kwargs["extra_body"] = extra_body
+    stream = client.chat.completions.create(**request_kwargs)
     for chunk in stream:
         if time.monotonic() - started >= timeout:
             raise SkillWizardAgentTimeout(f"Local agent did not answer within {int(timeout)}s")
+        reasoning_delta = ""
+        try:
+            delta_obj = chunk.choices[0].delta
+            for attr in ("reasoning", "reasoning_content", "thinking", "thought"):
+                value = getattr(delta_obj, attr, None)
+                if isinstance(value, str) and value:
+                    reasoning_delta += value
+            details = getattr(delta_obj, "reasoning_details", None)
+            if isinstance(details, list):
+                for item in details:
+                    if isinstance(item, dict):
+                        value = item.get("text") or item.get("content") or item.get("delta")
+                    else:
+                        value = getattr(item, "text", None) or getattr(item, "content", None) or getattr(item, "delta", None)
+                    if isinstance(value, str) and value:
+                        reasoning_delta += value
+        except Exception:
+            reasoning_delta = ""
+        if reasoning_delta and on_reasoning is not None:
+            if not on_reasoning(reasoning_delta):
+                raise RuntimeError("Wizard stream was closed by the browser")
         delta = ""
         try:
             delta = chunk.choices[0].delta.content or ""
@@ -1192,10 +1249,14 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
             streamed_any_reply = True
             return _stream_json_event(handler, {"type": "delta", "delta": delta})
 
+        def _on_reasoning(delta: str) -> bool:
+            return _stream_json_event(handler, {"type": "reasoning", "delta": delta})
+
         raw = _run_skill_wizard_agent_streaming(
             prompt,
             on_status=lambda status: _stream_json_event(handler, {"type": "status", "status": status}),
             on_delta=_on_delta,
+            on_reasoning=_on_reasoning,
         )
     except SkillWizardAgentTimeout as exc:
         payload, _status = _wizard_fallback_response(body, ctx, str(exc))

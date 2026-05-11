@@ -642,6 +642,52 @@ def test_local_bridge_skill_wizard_chat_streams_local_agent_reply(monkeypatch):
         handle.stop()
 
 
+def test_local_bridge_skill_wizard_streams_reasoning_events(monkeypatch):
+    import agent.wallet.context as wallet_context
+    import hermes_cli.local_bridge as local_bridge
+    from hermes_cli.local_bridge import start_local_bridge
+
+    monkeypatch.setattr(wallet_context, "build_wallet_context", lambda: SimpleNamespace(
+        wallet_address="EQcreator",
+        can_create_skills=True,
+        access_roles=["creator"],
+        matching_pair_numbers=[7],
+    ))
+
+    def fake_stream(_prompt, *, on_status, on_delta, on_reasoning):
+        assert on_status("thinking")
+        assert on_reasoning("Analyzing the skill idea...")
+        assert on_delta("Какой результат")
+        return json.dumps({
+            "reply": "Какой результат должен проверять skill?",
+            "done": False,
+            "draft": {"name": "wallet-debug"},
+            "missing": ["verification"],
+        })
+
+    monkeypatch.setattr(local_bridge, "_run_skill_wizard_agent_streaming", fake_stream)
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, events = _stream_request(
+            handle.port,
+            "/api/skills/marketplace/wizard-chat/stream",
+            body={
+                "action": "chat",
+                "language": "ru",
+                "messages": [{"role": "user", "content": "Хочу skill для проверки кошелька"}],
+            },
+            origin="https://skilzzz.com",
+        )
+        assert status == 200
+        assert any(event.get("type") == "reasoning" and "Analyzing" in event.get("delta", "") for event in events)
+        assert any(event.get("type") == "delta" and "Какой результат" in event.get("delta", "") for event in events)
+        assert events[-1]["type"] == "done"
+    finally:
+        handle.stop()
+
+
 def test_local_bridge_skill_wizard_chat_falls_back_when_agent_times_out(monkeypatch):
     import agent.wallet.context as wallet_context
     import hermes_cli.local_bridge as local_bridge
