@@ -1336,13 +1336,25 @@ def get_model_context_length(
     if base_url:
         cached = get_cached_context_length(model, base_url)
         if cached is not None:
+            cache_fallback = _lookup_default_context_length(model)
+            if (
+                cache_fallback is not None
+                and cache_fallback >= MINIMUM_CONTEXT_LENGTH
+                and cached < MINIMUM_CONTEXT_LENGTH
+            ):
+                logger.info(
+                    "Dropping stale context cache entry %s@%s -> %s; "
+                    "known fallback is %s",
+                    model, base_url, f"{cached:,}", f"{cache_fallback:,}",
+                )
+                _invalidate_cached_context_length(model, base_url)
             # Invalidate stale Codex OAuth cache entries: pre-PR #14935 builds
             # resolved gpt-5.x to the direct-API value (e.g. 1.05M) via
             # models.dev and persisted it. Codex OAuth caps at 272K for every
             # slug, so any cached Codex entry at or above 400K is a leftover
             # from the old resolution path. Drop it and fall through to the
             # live /models probe in step 5 below.
-            if provider == "openai-codex" and cached >= 400_000:
+            elif provider == "openai-codex" and cached >= 400_000:
                 logger.info(
                     "Dropping stale Codex cache entry %s@%s -> %s (pre-fix value); "
                     "re-resolving via live /models probe",
@@ -1351,7 +1363,6 @@ def get_model_context_length(
                 _invalidate_cached_context_length(model, base_url)
             else:
                 return cached
-
     # 1b. AWS Bedrock — use static context length table.
     # Bedrock's ListFoundationModels API doesn't expose context window sizes,
     # so we maintain a curated table in bedrock_adapter.py that reflects

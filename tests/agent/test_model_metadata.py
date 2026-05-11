@@ -527,6 +527,21 @@ class TestGetModelContextLength:
             assert result == 32768  # cache wins over API's 999999
 
     @patch("agent.model_metadata.fetch_model_metadata")
+    def test_stale_low_cache_is_ignored_for_known_large_context_model(self, mock_fetch, tmp_path):
+        """Known 64K+ model families should not be blocked by stale 32K cache."""
+        mock_fetch.return_value = {}
+        cache_file = tmp_path / "cache.yaml"
+        with patch("agent.model_metadata._get_context_cache_path", return_value=cache_file):
+            save_context_length("moonshotai/kimi-k2.6", "https://openrouter.ai/api/v1", 32768)
+            result = get_model_context_length(
+                "moonshotai/kimi-k2.6",
+                base_url="https://openrouter.ai/api/v1",
+                provider="openrouter",
+            )
+            assert result == 262144
+            assert get_cached_context_length("moonshotai/kimi-k2.6", "https://openrouter.ai/api/v1") is None
+
+    @patch("agent.model_metadata.fetch_model_metadata")
     def test_no_base_url_skips_cache(self, mock_fetch, tmp_path):
         """Without base_url, cache lookup is skipped."""
         mock_fetch.return_value = {}
