@@ -141,6 +141,8 @@ def test_local_bridge_status(monkeypatch):
         assert payload["skills"][0]["skillId"] == "alpha"
         assert payload["bridgeTokenHeader"] == "X-NOTPUNKS-Bridge-Token"
         assert len(payload["bridgeToken"]) >= 32
+        assert payload["scopedBridgeToken"].startswith("npbt1.")
+        assert "skill:install" in payload["bridgeTokenScopes"]
     finally:
         handle.stop()
 
@@ -252,6 +254,36 @@ def test_local_bridge_rejects_mutation_without_pairing_token(monkeypatch):
             "/api/skills/marketplace/install",
             body={"name": "alpha"},
             bridge_token=False,
+        )
+        assert status == 401
+        assert payload["error"] == "Bridge pairing token is required"
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_rejects_scoped_token_without_required_scope(monkeypatch):
+    from hermes_cli.local_bridge import start_local_bridge
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, token_payload = _request(
+            handle.port,
+            "GET",
+            "/api/skills/marketplace/status",
+            origin="https://agent.notpunks.com",
+            bridge_token=False,
+        )
+        assert status == 200
+        assert token_payload["scopedBridgeToken"].startswith("npbt1.")
+        assert "skill:install" not in token_payload["bridgeTokenScopes"]
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/install",
+            body={"name": "alpha"},
+            origin="https://agent.notpunks.com",
+            bridge_token=token_payload["scopedBridgeToken"],
         )
         assert status == 401
         assert payload["error"] == "Bridge pairing token is required"

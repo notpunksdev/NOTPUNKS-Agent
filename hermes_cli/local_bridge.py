@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -37,9 +38,34 @@ ALLOWED_ORIGINS = {
 }
 _PENDING_INSTALLS: dict[str, dict[str, Any]] = {}
 _PENDING_LOCK = threading.Lock()
+_RATE_LIMITS: dict[tuple[str, str, str], list[float]] = {}
+_RATE_LIMIT_LOCK = threading.Lock()
 _REQUEST_TTL_SECONDS = 600
 _INSTALL_SIGNATURE_TTL_SECONDS = 600
+_SCOPED_TOKEN_TTL_SECONDS = 6 * 60 * 60
 _INSTALL_REQUEST_CALLBACK: Callable[[dict[str, Any]], None] | None = None
+
+_PATH_SCOPES = {
+    ("POST", "/api/skills/marketplace/ai-scan"): "skill:scan",
+    ("POST", "/api/skills/marketplace/wizard-chat"): "wizard:chat",
+    ("POST", "/api/skills/marketplace/wizard-chat/stream"): "wizard:chat",
+    ("POST", "/api/skills/marketplace/create-draft"): "skill:draft",
+    ("POST", "/api/skills/marketplace/publish-draft"): "skill:publish",
+    ("POST", "/api/skills/marketplace/install"): "skill:install",
+    ("DELETE", "/api/skills/marketplace/install"): "skill:uninstall",
+}
+
+_ORIGIN_SCOPES = {
+    "https://skilzzz.com": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+    "https://www.skilzzz.com": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+    "https://agent.notpunks.com": {"wallet:status"},
+    "https://www.agent.notpunks.com": {"wallet:status"},
+    "https://app.notpunks.com": {"skill:install", "skill:uninstall"},
+    "http://localhost:3000": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+    "http://127.0.0.1:3000": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+    "http://localhost:3004": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+    "http://127.0.0.1:3004": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+}
 
 
 def _pending_store_path() -> Path:
@@ -52,6 +78,12 @@ def _bridge_token_path() -> Path:
     from hermes_constants import get_hermes_home
 
     return get_hermes_home() / "marketplace_bridge_token"
+
+
+def _bridge_audit_log_path() -> Path:
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / "marketplace_bridge_audit.jsonl"
 
 
 def _get_bridge_token() -> str:
@@ -73,6 +105,115 @@ def _get_bridge_token() -> str:
     except Exception:
         return token
     return token
+
+
+def _b64url(data: bytes) -> str:
+    import base64
+
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _unb64url(data: str) -> bytes:
+    import base64
+
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode((data + padding).encode("ascii"))
+
+
+def _scopes_for_origin(origin: str) -> set[str]:
+    return set(_ORIGIN_SCOPES.get(origin, set()))
+
+
+def _mint_scoped_bridge_token(origin: str) -> str:
+    payload = {
+        "v": 1,
+        "origin": origin,
+        "scopes": sorted(_scopes_for_origin(origin)),
+        "iat": int(time.time()),
+        "exp": int(time.time() + _SCOPED_TOKEN_TTL_SECONDS),
+        "nonce": secrets.token_urlsafe(12),
+    }
+    body = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    sig = hmac.new(_get_bridge_token().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    return f"npbt1.{body}.{_b64url(sig)}"
+
+
+def _verify_scoped_bridge_token(token: str, *, origin: str, scope: str) -> bool:
+    if not token.startswith("npbt1."):
+        return False
+    parts = token.split(".")
+    if len(parts) != 3:
+        return False
+    _prefix, body, sig = parts
+    expected = hmac.new(_get_bridge_token().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    try:
+        provided = _unb64url(sig)
+    except Exception:
+        return False
+    if not hmac.compare_digest(provided, expected):
+        return False
+    try:
+        payload = json.loads(_unb64url(body).decode("utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    if str(payload.get("origin") or "") != origin:
+        return False
+    try:
+        if int(payload.get("exp") or 0) < int(time.time()):
+            return False
+    except Exception:
+        return False
+    scopes = payload.get("scopes")
+    if not isinstance(scopes, list):
+        return False
+    return scope in {str(item) for item in scopes}
+
+
+def _audit_bridge_event(handler: BaseHTTPRequestHandler, action: str, status: str, details: dict[str, Any] | None = None) -> None:
+    event = {
+        "ts": int(time.time()),
+        "origin": handler.headers.get("Origin", ""),
+        "method": getattr(handler, "command", ""),
+        "path": urlparse(getattr(handler, "path", "")).path,
+        "action": action,
+        "status": status,
+    }
+    if details:
+        event["details"] = {str(k): str(v)[:200] for k, v in details.items()}
+    try:
+        path = _bridge_audit_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, sort_keys=True) + "\n")
+    except Exception:
+        return
+
+
+def _rate_limit_key(handler: BaseHTTPRequestHandler) -> tuple[str, str, str]:
+    return (
+        handler.client_address[0] if getattr(handler, "client_address", None) else "",
+        handler.headers.get("Origin", ""),
+        urlparse(handler.path).path,
+    )
+
+
+def _rate_limit_exceeded(handler: BaseHTTPRequestHandler) -> bool:
+    key = _rate_limit_key(handler)
+    now = time.monotonic()
+    window = 60.0
+    limit = 30
+    if key[2].endswith("/wizard-chat/stream") or key[2].endswith("/wizard-chat"):
+        limit = 12
+    with _RATE_LIMIT_LOCK:
+        hits = [item for item in _RATE_LIMITS.get(key, []) if now - item < window]
+        if len(hits) >= limit:
+            _RATE_LIMITS[key] = hits
+            return True
+        hits.append(now)
+        _RATE_LIMITS[key] = hits
+    return False
 
 
 def _load_pending_unlocked() -> None:
@@ -186,6 +327,7 @@ def _write_cors_headers(handler: BaseHTTPRequestHandler) -> None:
         handler.send_header("Vary", "Origin")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", f"Content-Type, {BRIDGE_TOKEN_HEADER}")
+    handler.send_header("Access-Control-Expose-Headers", BRIDGE_TOKEN_HEADER)
 
 
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
@@ -535,11 +677,26 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         return True
 
     def _reject_bad_bridge_token(self) -> bool:
-        expected = _get_bridge_token()
+        parsed = urlparse(self.path)
+        required_scope = _PATH_SCOPES.get((self.command, parsed.path))
+        if parsed.path.startswith("/api/skills/marketplace/install-requests/"):
+            required_scope = "skill:install"
         provided = self.headers.get(BRIDGE_TOKEN_HEADER, "")
+        if required_scope and _verify_scoped_bridge_token(str(provided or ""), origin=self.headers.get("Origin", ""), scope=required_scope):
+            return False
+        # Backward compatibility for already-open Skilzzz tabs and older builds.
+        expected = _get_bridge_token()
         if secrets.compare_digest(str(provided or ""), expected):
             return False
+        _audit_bridge_event(self, required_scope or "bridge", "unauthorized")
         _json_response(self, HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "Bridge pairing token is required"})
+        return True
+
+    def _reject_rate_limited(self) -> bool:
+        if not _rate_limit_exceeded(self):
+            return False
+        _audit_bridge_event(self, "rate-limit", "rejected")
+        _json_response(self, HTTPStatus.TOO_MANY_REQUESTS, {"ok": False, "error": "Bridge rate limit exceeded"})
         return True
 
     def do_OPTIONS(self) -> None:
@@ -579,6 +736,9 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     "approvalRequired": True,
                 },
                 "bridgeToken": _get_bridge_token(),
+                "scopedBridgeToken": _mint_scoped_bridge_token(self.headers.get("Origin", "")),
+                "bridgeTokenExpiresIn": _SCOPED_TOKEN_TTL_SECONDS,
+                "bridgeTokenScopes": sorted(_scopes_for_origin(self.headers.get("Origin", ""))),
                 "bridgeTokenHeader": BRIDGE_TOKEN_HEADER,
             })
             return
@@ -612,11 +772,16 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             "tunnelEnabled": bool(getattr(self.server, "notpunks_tunnel_enabled", False)),
             "tunnelError": str(getattr(self.server, "notpunks_tunnel_error", "") or ""),
             "bridgeToken": _get_bridge_token(),
+            "scopedBridgeToken": _mint_scoped_bridge_token(self.headers.get("Origin", "")),
+            "bridgeTokenExpiresIn": _SCOPED_TOKEN_TTL_SECONDS,
+            "bridgeTokenScopes": sorted(_scopes_for_origin(self.headers.get("Origin", ""))),
             "bridgeTokenHeader": BRIDGE_TOKEN_HEADER,
         })
 
     def do_POST(self) -> None:
         if self._reject_bad_origin():
+            return
+        if self._reject_rate_limited():
             return
         if self._reject_bad_bridge_token():
             return
@@ -667,10 +832,13 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             payload, status = _publish_marketplace_skill_draft(body)
         else:
             payload, status = _install_marketplace_skill(body, origin=self.headers.get("Origin", ""))
+        _audit_bridge_event(self, _PATH_SCOPES.get(("POST", parsed.path), parsed.path), str(int(status)))
         _json_response(self, status, payload)
 
     def do_DELETE(self) -> None:
         if self._reject_bad_origin():
+            return
+        if self._reject_rate_limited():
             return
         if self._reject_bad_bridge_token():
             return
@@ -684,6 +852,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "Invalid JSON body"})
             return
         payload, status = _uninstall_marketplace_skill(body)
+        _audit_bridge_event(self, _PATH_SCOPES.get(("DELETE", parsed.path), parsed.path), str(int(status)))
         _json_response(self, status, payload)
 
 
