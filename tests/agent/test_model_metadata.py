@@ -505,6 +505,19 @@ class TestGetModelContextLength:
         assert get_model_context_length("moonshotai/kimi-k2.6", provider="nous") == 262144
 
     @patch("agent.model_metadata.fetch_model_metadata")
+    def test_openrouter_kimi_ignores_stale_low_live_context(self, mock_fetch):
+        """OpenRouter may temporarily report 32K for Kimi K2.6; do not block startup."""
+        mock_fetch.return_value = {
+            "moonshotai/kimi-k2.6": {"context_length": 32768},
+        }
+        with patch("agent.models_dev.lookup_models_dev_context", return_value=None):
+            assert get_model_context_length(
+                "moonshotai/kimi-k2.6",
+                base_url="https://openrouter.ai/api/v1",
+                provider="openrouter",
+            ) == 262144
+
+    @patch("agent.model_metadata.fetch_model_metadata")
     def test_default_context_match_is_case_insensitive(self, mock_fetch):
         mock_fetch.return_value = {}
         assert get_model_context_length("moonshotai/Kimi-K2.6") == 262144

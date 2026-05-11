@@ -1479,7 +1479,11 @@ def get_model_context_length(
     # 6. OpenRouter live API metadata (provider-unaware fallback)
     metadata = fetch_model_metadata()
     if model in metadata:
-        return metadata[model].get("context_length", DEFAULT_FALLBACK_CONTEXT)
+        ctx = metadata[model].get("context_length", DEFAULT_FALLBACK_CONTEXT)
+        preferred = _prefer_default_when_detected_too_small(model, ctx)
+        if preferred:
+            return preferred
+        return ctx
 
     # 8. Hardcoded defaults (fuzzy match — longest key first for specificity)
     # Only check `default_model in model` (is the key a substring of the input).
