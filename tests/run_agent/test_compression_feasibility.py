@@ -182,6 +182,7 @@ def test_feasibility_check_passes_config_context_length(mock_get_client, mock_ct
         api_key="sk-custom",
         config_context_length=1_000_000,
         provider="openrouter",
+        custom_providers=[],
     )
 
 
@@ -205,7 +206,35 @@ def test_feasibility_check_ignores_invalid_context_length(mock_get_client, mock_
         api_key="sk-test",
         config_context_length=None,
         provider="openrouter",
+        custom_providers=[],
     )
+
+
+@patch("hermes_cli.config.load_config", return_value={})
+@patch("agent.auxiliary_client._resolve_task_provider_model")
+@patch("agent.auxiliary_client.get_text_auxiliary_client")
+def test_aux_kimi_ignores_stale_low_compression_context(
+    mock_get_client,
+    mock_resolve_aux,
+    mock_load_config,
+):
+    """Stale 32K auxiliary.compression.context_length must not block Kimi."""
+    agent = _make_agent(main_context=200_000, threshold_percent=0.50)
+    agent.provider = "nous"
+    agent._aux_compression_context_length_config = 32_768
+    mock_client = MagicMock()
+    mock_client.base_url = "https://openrouter.ai/api/v1"
+    mock_client.api_key = "sk-aux"
+    mock_get_client.return_value = (mock_client, "moonshotai/kimi-k2.6")
+    mock_resolve_aux.return_value = ("openrouter", "moonshotai/kimi-k2.6", None, None, None)
+
+    messages = []
+    agent._emit_status = lambda msg: messages.append(msg)
+
+    agent._check_compression_model_feasibility()
+
+    assert messages == []
+    assert agent._compression_warning is None
 
 
 def test_init_feasibility_check_uses_aux_context_override_from_config():
@@ -238,6 +267,7 @@ def test_init_feasibility_check_uses_aux_context_override_from_config():
         patch("hermes_cli.config.load_config", return_value=cfg),
         patch("run_agent.get_tool_definitions", return_value=[]),
         patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("hermes_logging.setup_logging"),
         patch("run_agent.OpenAI"),
         patch("run_agent.ContextCompressor", new=_StubCompressor),
         patch("agent.auxiliary_client.get_text_auxiliary_client", return_value=(mock_client, "custom/big-model")),
@@ -258,6 +288,7 @@ def test_init_feasibility_check_uses_aux_context_override_from_config():
         api_key="sk-custom",
         config_context_length=1_000_000,
         provider="",
+        custom_providers=[],
     )
 
 

@@ -2487,13 +2487,24 @@ class AIAgent:
 
             aux_base_url = str(getattr(client, "base_url", ""))
             aux_api_key = str(getattr(client, "api_key", ""))
+            aux_context_provider = str(_aux_cfg_provider or "").strip()
+            if aux_context_provider in ("", "auto", "main"):
+                aux_context_provider = str(getattr(self, "provider", "") or "").strip()
+            aux_custom_providers = None
+            try:
+                from hermes_cli.config import load_config, get_compatible_custom_providers
+
+                aux_custom_providers = get_compatible_custom_providers(load_config())
+            except Exception:
+                aux_custom_providers = None
 
             aux_context = get_model_context_length(
                 aux_model,
                 base_url=aux_base_url,
                 api_key=aux_api_key,
                 config_context_length=getattr(self, "_aux_compression_context_length_config", None),
-                provider=getattr(self, "provider", ""),
+                provider=aux_context_provider,
+                custom_providers=aux_custom_providers,
             )
 
             # Hard floor: the auxiliary compression model must have at least
