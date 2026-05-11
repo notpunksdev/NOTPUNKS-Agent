@@ -37,6 +37,7 @@ ALLOWED_ORIGINS = {
     "http://127.0.0.1:3004",
 }
 _PENDING_INSTALLS: dict[str, dict[str, Any]] = {}
+_PENDING_PAIRINGS: dict[str, dict[str, Any]] = {}
 _PENDING_LOCK = threading.Lock()
 _RATE_LIMITS: dict[tuple[str, str, str], list[float]] = {}
 _RATE_LIMIT_LOCK = threading.Lock()
@@ -125,10 +126,14 @@ def _scopes_for_origin(origin: str) -> set[str]:
 
 
 def _mint_scoped_bridge_token(origin: str) -> str:
+    return _mint_scoped_bridge_token_for_scopes(origin, _scopes_for_origin(origin))
+
+
+def _mint_scoped_bridge_token_for_scopes(origin: str, scopes: set[str]) -> str:
     payload = {
         "v": 1,
         "origin": origin,
-        "scopes": sorted(_scopes_for_origin(origin)),
+        "scopes": sorted(scopes),
         "iat": int(time.time()),
         "exp": int(time.time() + _SCOPED_TOKEN_TTL_SECONDS),
         "nonce": secrets.token_urlsafe(12),
@@ -399,6 +404,103 @@ def _prune_pending(now: float | None = None) -> None:
             _PENDING_INSTALLS.pop(request_id, None)
         if expired:
             _save_pending_unlocked()
+        expired_pairings = [
+            request_id for request_id, request in _PENDING_PAIRINGS.items()
+            if current - float(request.get("created_at", 0)) > _REQUEST_TTL_SECONDS
+        ]
+        for request_id in expired_pairings:
+            _PENDING_PAIRINGS.pop(request_id, None)
+
+
+def _pairing_public_payload(request: dict[str, Any], *, include_token: bool = False) -> dict[str, Any]:
+    payload = {
+        "id": str(request.get("id") or ""),
+        "origin": str(request.get("origin") or ""),
+        "status": str(request.get("status") or "pending"),
+        "scopes": list(request.get("scopes") or []),
+        "created_at": request.get("created_at"),
+        "expires_at": float(request.get("created_at") or 0) + _REQUEST_TTL_SECONDS,
+        "approveCommand": f"/marketplace bridge pair approve {request.get('id', '')}",
+        "denyCommand": f"/marketplace bridge pair deny {request.get('id', '')}",
+    }
+    if include_token and payload["status"] == "approved" and request.get("scopedBridgeToken"):
+        payload["scopedBridgeToken"] = str(request.get("scopedBridgeToken") or "")
+        payload["bridgeTokenExpiresIn"] = _SCOPED_TOKEN_TTL_SECONDS
+        payload["bridgeTokenHeader"] = BRIDGE_TOKEN_HEADER
+    return payload
+
+
+def create_pairing_request(body: dict[str, Any] | None = None, *, origin: str = "") -> dict[str, Any]:
+    _prune_pending()
+    body = body if isinstance(body, dict) else {}
+    allowed_scopes = _scopes_for_origin(origin)
+    requested = body.get("scopes")
+    if isinstance(requested, list):
+        scopes = {str(item).strip() for item in requested if str(item).strip()} & allowed_scopes
+    else:
+        scopes = set(allowed_scopes)
+    request_id = secrets.token_hex(8)
+    request = {
+        "id": request_id,
+        "origin": origin,
+        "status": "pending",
+        "scopes": sorted(scopes),
+        "created_at": time.time(),
+    }
+    with _PENDING_LOCK:
+        _PENDING_PAIRINGS[request_id] = request
+    _notify_install_request({"event": "pairing_request", **request})
+    return _pairing_public_payload(request, include_token=False)
+
+
+def list_pairing_requests() -> list[dict[str, Any]]:
+    _prune_pending()
+    with _PENDING_LOCK:
+        return sorted(
+            (_pairing_public_payload(value, include_token=False) for value in _PENDING_PAIRINGS.values()),
+            key=lambda item: float(item.get("created_at") or 0),
+        )
+
+
+def approve_pairing_request(request_id: str) -> dict[str, Any] | None:
+    _prune_pending()
+    with _PENDING_LOCK:
+        request = _PENDING_PAIRINGS.get(request_id)
+        if not request:
+            return None
+        request["status"] = "approved"
+        request["approved_at"] = time.time()
+        request["scopedBridgeToken"] = _mint_scoped_bridge_token_for_scopes(
+            str(request.get("origin") or ""),
+            {str(item) for item in request.get("scopes") or []},
+        )
+        return _pairing_public_payload(request, include_token=True)
+
+
+def deny_pairing_request(request_id: str) -> dict[str, Any] | None:
+    _prune_pending()
+    with _PENDING_LOCK:
+        request = _PENDING_PAIRINGS.get(request_id)
+        if not request:
+            return None
+        request["status"] = "denied"
+        request["denied_at"] = time.time()
+        return _pairing_public_payload(request, include_token=False)
+
+
+def get_pairing_request(request_id: str) -> dict[str, Any] | None:
+    current = time.time()
+    with _PENDING_LOCK:
+        request = _PENDING_PAIRINGS.get(request_id)
+        if not request:
+            return None
+        if current - float(request.get("created_at", 0)) > _REQUEST_TTL_SECONDS:
+            expired = dict(request)
+            expired["status"] = "expired"
+            expired["expired_at"] = current
+            _PENDING_PAIRINGS.pop(request_id, None)
+            return _pairing_public_payload(expired, include_token=False)
+        return _pairing_public_payload(request, include_token=True)
 
 
 def create_install_request(body: dict[str, Any], *, origin: str = "") -> dict[str, Any]:
@@ -684,10 +786,6 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         provided = self.headers.get(BRIDGE_TOKEN_HEADER, "")
         if required_scope and _verify_scoped_bridge_token(str(provided or ""), origin=self.headers.get("Origin", ""), scope=required_scope):
             return False
-        # Backward compatibility for already-open Skilzzz tabs and older builds.
-        expected = _get_bridge_token()
-        if secrets.compare_digest(str(provided or ""), expected):
-            return False
         _audit_bridge_event(self, required_scope or "bridge", "unauthorized")
         _json_response(self, HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "Bridge pairing token is required"})
         return True
@@ -720,6 +818,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 "tunnelError": str(getattr(self.server, "notpunks_tunnel_error", "") or ""),
                 "endpoints": [
                     "GET /api/skills/marketplace/status",
+                    "POST /api/skills/marketplace/pairing/request",
+                    "GET /api/skills/marketplace/pairing/request/<id>",
                     "POST /api/skills/marketplace/ai-scan",
                     "POST /api/skills/marketplace/wizard-chat",
                     "POST /api/skills/marketplace/wizard-chat/stream",
@@ -735,12 +835,24 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                     "fields": ["name", "walletAddress", "metadataUrl", "expectedBundleHash", "mode"],
                     "approvalRequired": True,
                 },
-                "bridgeToken": _get_bridge_token(),
-                "scopedBridgeToken": _mint_scoped_bridge_token(self.headers.get("Origin", "")),
+                "pairingRequired": True,
                 "bridgeTokenExpiresIn": _SCOPED_TOKEN_TTL_SECONDS,
                 "bridgeTokenScopes": sorted(_scopes_for_origin(self.headers.get("Origin", ""))),
                 "bridgeTokenHeader": BRIDGE_TOKEN_HEADER,
             })
+            return
+        if parsed.path.startswith("/api/skills/marketplace/pairing/request/"):
+            request_id = parsed.path.rsplit("/", 1)[-1].strip()
+            request = get_pairing_request(request_id)
+            if not request:
+                _json_response(self, HTTPStatus.NOT_FOUND, {
+                    "ok": False,
+                    "requestId": request_id,
+                    "status": "expired",
+                    "error": "Bridge pairing request not found or expired",
+                })
+                return
+            _json_response(self, HTTPStatus.OK, {"ok": True, "request": request})
             return
         if parsed.path.startswith("/api/skills/marketplace/install-requests/"):
             request_id = parsed.path.rsplit("/", 1)[-1].strip()
@@ -771,8 +883,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             "publicUrl": str(getattr(self.server, "notpunks_public_url", "") or ""),
             "tunnelEnabled": bool(getattr(self.server, "notpunks_tunnel_enabled", False)),
             "tunnelError": str(getattr(self.server, "notpunks_tunnel_error", "") or ""),
-            "bridgeToken": _get_bridge_token(),
-            "scopedBridgeToken": _mint_scoped_bridge_token(self.headers.get("Origin", "")),
+            "pairingRequired": True,
             "bridgeTokenExpiresIn": _SCOPED_TOKEN_TTL_SECONDS,
             "bridgeTokenScopes": sorted(_scopes_for_origin(self.headers.get("Origin", ""))),
             "bridgeTokenHeader": BRIDGE_TOKEN_HEADER,
@@ -783,9 +894,19 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             return
         if self._reject_rate_limited():
             return
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/skills/marketplace/pairing/request":
+            try:
+                body = _read_json(self)
+            except Exception:
+                _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "Invalid JSON body"})
+                return
+            request = create_pairing_request(body, origin=self.headers.get("Origin", ""))
+            _audit_bridge_event(self, "bridge:pair", "pending", {"requestId": request.get("id", "")})
+            _json_response(self, HTTPStatus.ACCEPTED, {"ok": True, "request": request})
+            return
         if self._reject_bad_bridge_token():
             return
-        parsed = urlparse(self.path)
         if parsed.path.startswith("/api/skills/marketplace/install-requests/"):
             parts = [part for part in parsed.path.split("/") if part]
             request_id = parts[-2] if len(parts) >= 2 else ""

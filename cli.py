@@ -6126,8 +6126,11 @@ class HermesCLI:
     def _handle_marketplace_command(self, cmd: str):
         """Handle /marketplace bridge commands."""
         from hermes_cli.local_bridge import (
+            approve_pairing_request,
             approve_install_request,
+            deny_pairing_request,
             deny_install_request,
+            list_pairing_requests,
             list_install_requests,
             local_bridge_config,
             start_local_bridge,
@@ -6135,7 +6138,7 @@ class HermesCLI:
 
         parts = cmd.strip().split()
         if len(parts) < 2 or parts[1].lower() != "bridge":
-            _cprint("  Usage: /marketplace bridge [status|start|stop|on|off|tunnel|requests|approve|deny]")
+            _cprint("  Usage: /marketplace bridge [status|start|stop|on|off|tunnel|requests|approve|deny|pair]")
             return
         action = parts[2].lower() if len(parts) > 2 else "status"
 
@@ -6150,6 +6153,7 @@ class HermesCLI:
             except Exception:
                 count = 0
             pending = len([r for r in list_install_requests() if r.get("status") == "pending"])
+            pairings = len([r for r in list_pairing_requests() if r.get("status") == "pending"])
             _cprint("  Local marketplace bridge")
             _cprint(f"    Enabled:   {'yes' if cfg['enabled'] else 'no'}")
             _cprint(f"    Running:   {'yes' if running else 'no'}")
@@ -6164,6 +6168,7 @@ class HermesCLI:
                 _cprint(f"    Secure:    {'starting' if not tunnel_error else 'failed'}")
             _cprint(f"    Skills:    {count} marketplace install(s)")
             _cprint(f"    Pending:   {pending} approval request(s)")
+            _cprint(f"    Pairings:  {pairings} pending browser pairing request(s)")
 
         if action == "status":
             _print_status()
@@ -6228,15 +6233,56 @@ class HermesCLI:
 
         if action in {"requests", "list"}:
             requests = list_install_requests()
+            pairings = list_pairing_requests()
             if not requests:
-                _cprint("  No local marketplace bridge approval requests.")
-                return
-            _cprint("  Local marketplace bridge approval requests")
+                _cprint("  No local marketplace install approval requests.")
+            else:
+                _cprint("  Local marketplace bridge approval requests")
             for request in requests:
                 _cprint(
                     f"    {request['id']}  {request.get('status', 'pending')}  "
                     f"{request.get('name', '')}  force={bool(request.get('force'))}"
                 )
+            if not pairings:
+                _cprint("  No browser pairing requests.")
+            else:
+                _cprint("  Browser pairing requests")
+                for request in pairings:
+                    scopes = ",".join(request.get("scopes") or [])
+                    _cprint(
+                        f"    {request['id']}  {request.get('status', 'pending')}  "
+                        f"{request.get('origin', '')}  scopes={scopes}"
+                    )
+            return
+
+        if action == "pair":
+            pair_action = parts[3].lower() if len(parts) > 3 else "list"
+            if pair_action in {"requests", "list"}:
+                requests = list_pairing_requests()
+                if not requests:
+                    _cprint("  No browser pairing requests.")
+                    return
+                _cprint("  Browser pairing requests")
+                for request in requests:
+                    scopes = ",".join(request.get("scopes") or [])
+                    _cprint(
+                        f"    {request['id']}  {request.get('status', 'pending')}  "
+                        f"{request.get('origin', '')}  scopes={scopes}"
+                    )
+                return
+            if pair_action not in {"approve", "deny"} or len(parts) < 5:
+                _cprint("  Usage: /marketplace bridge pair [list|approve|deny] <request-id>")
+                return
+            request_id = parts[4].strip()
+            request = approve_pairing_request(request_id) if pair_action == "approve" else deny_pairing_request(request_id)
+            if not request:
+                _cprint(f"  Browser pairing request not found or expired: {request_id}")
+                return
+            if pair_action == "approve":
+                _cprint(f"  Approved browser pairing request {request_id}: {request.get('origin', '')}")
+                _cprint("  Return to skilzzz.com; the bridge action can continue.")
+            else:
+                _cprint(f"  Denied browser pairing request {request_id}: {request.get('origin', '')}")
             return
 
         if action in {"approve", "deny"}:
@@ -6279,12 +6325,19 @@ class HermesCLI:
                 _cprint(f"  Denied marketplace {action_label} request {request_id}: {request.get('name', '')}")
             return
 
-        _cprint("  Usage: /marketplace bridge [status|start|stop|on|off|tunnel|requests|approve|deny]")
+        _cprint("  Usage: /marketplace bridge [status|start|stop|on|off|tunnel|requests|approve|deny|pair]")
 
     def _prompt_marketplace_install_request(self, request: dict):
         """Prompt the local CLI user to approve a marketplace install request."""
         import time as _time
-        from hermes_cli.local_bridge import approve_install_request, deny_install_request, get_install_request
+        from hermes_cli.local_bridge import (
+            approve_install_request,
+            approve_pairing_request,
+            deny_install_request,
+            deny_pairing_request,
+            get_install_request,
+            get_pairing_request,
+        )
 
         if request.get("event") == "install_result":
             name = str(request.get("name") or "unknown").strip()
@@ -6303,6 +6356,65 @@ class HermesCLI:
                 _cprint(f"  Marketplace {failed_action} failed: {name}")
                 if message:
                     _cprint(f"  {message}")
+            return
+
+        if request.get("event") == "pairing_request":
+            request_id = str(request.get("id") or "").strip()
+            if not request_id:
+                return
+            current = get_pairing_request(request_id)
+            if not current or current.get("status") != "pending":
+                return
+            origin = str(current.get("origin") or "").strip()
+            scopes = ", ".join(current.get("scopes") or [])
+            _cprint("")
+            _cprint(f"  {_ACCENT}Browser pairing request{_RST}")
+            _cprint(f"    Origin: {origin or '-'}")
+            _cprint(f"    Scopes: {scopes or '-'}")
+
+            response_queue = queue.Queue()
+            description = (
+                f"Origin: {origin or '-'}\n"
+                f"Scopes: {scopes or '-'}\n\n"
+                "Approve only if this browser tab is yours. Press y to approve, n to deny, or Enter to use the selected choice."
+            )
+            with self._approval_lock:
+                self._approval_state = {
+                    "title": "Bridge Pairing",
+                    "command": f"Pair browser with local marketplace bridge ({origin or 'unknown origin'})",
+                    "description": description,
+                    "choices": ["yes", "no"],
+                    "choice_labels": {
+                        "yes": "Yes, pair this browser",
+                        "no": "No, deny",
+                    },
+                    "selected": 0,
+                    "response_queue": response_queue,
+                }
+                self._approval_deadline = _time.monotonic() + 600
+                self._invalidate()
+                try:
+                    answer = response_queue.get(timeout=600)
+                except queue.Empty:
+                    answer = "no"
+                finally:
+                    self._approval_state = None
+                    self._approval_deadline = 0
+                    self._invalidate()
+
+            if str(answer or "").strip().lower() in {"y", "yes"}:
+                approved = approve_pairing_request(request_id)
+                if approved:
+                    _cprint(f"  Approved browser pairing request {request_id}: {origin}")
+                    _cprint("  Return to skilzzz.com; the bridge action can continue.")
+                else:
+                    _cprint(f"  Browser pairing request not found or expired: {request_id}")
+            else:
+                denied = deny_pairing_request(request_id)
+                if denied:
+                    _cprint(f"  Denied browser pairing request {request_id}: {origin}")
+                else:
+                    _cprint(f"  Browser pairing request not found or expired: {request_id}")
             return
 
         request_id = str(request.get("id") or "").strip()

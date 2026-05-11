@@ -151,7 +151,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
                    "snapshot", "tap",
                )),
     CommandDef("marketplace", "Manage local marketplace bridge",
-               "Tools & Skills", cli_only=True, args_hint="bridge [status|start|stop|on|off|requests|approve|deny]",
+               "Tools & Skills", cli_only=True, args_hint="bridge [status|start|stop|on|off|requests|approve|deny|pair]",
                subcommands=("bridge",)),
     CommandDef("cron", "Manage scheduled tasks", "Tools & Skills",
                cli_only=True, args_hint="[subcommand]",

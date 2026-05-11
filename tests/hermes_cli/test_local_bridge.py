@@ -5,6 +5,32 @@ import threading
 from types import SimpleNamespace
 
 
+def _pairing_token(port: int, *, origin="https://app.notpunks.com", scopes=None) -> str:
+    status, _headers, payload = _request(
+        port,
+        "POST",
+        "/api/skills/marketplace/pairing/request",
+        body={"scopes": scopes or []} if scopes is not None else {},
+        origin=origin,
+        bridge_token=False,
+    )
+    assert status == 202
+    request_id = payload["request"]["id"]
+    from hermes_cli.local_bridge import approve_pairing_request
+
+    approved = approve_pairing_request(request_id)
+    assert approved is not None
+    status, _headers, payload = _request(
+        port,
+        "GET",
+        f"/api/skills/marketplace/pairing/request/{request_id}",
+        origin=origin,
+        bridge_token=False,
+    )
+    assert status == 200
+    return payload["request"]["scopedBridgeToken"]
+
+
 def _request(
     port: int,
     method: str,
@@ -23,15 +49,7 @@ def _request(
         headers["Content-Type"] = "application/json"
         body = json.dumps(body)
     if method in {"POST", "DELETE"} and bridge_token is True:
-        token_status, _token_headers, token_payload = _request(
-            port,
-            "GET",
-            "/api/skills/marketplace/status",
-            origin=origin,
-            bridge_token=False,
-        )
-        assert token_status == 200
-        headers["X-NOTPUNKS-Bridge-Token"] = token_payload["bridgeToken"]
+        headers["X-NOTPUNKS-Bridge-Token"] = _pairing_token(port, origin=origin)
     elif isinstance(bridge_token, str):
         headers["X-NOTPUNKS-Bridge-Token"] = bridge_token
     conn.request(method, path, body=body, headers=headers)
@@ -49,18 +67,11 @@ def _stream_request(
     body=None,
     origin="https://app.notpunks.com",
 ):
-    token_status, _token_headers, token_payload = _request(
-        port,
-        "GET",
-        "/api/skills/marketplace/status",
-        origin=origin,
-        bridge_token=False,
-    )
-    assert token_status == 200
+    token = _pairing_token(port, origin=origin, scopes=["wizard:chat"])
     headers = {
         "Origin": origin,
         "Content-Type": "application/json",
-        "X-NOTPUNKS-Bridge-Token": token_payload["bridgeToken"],
+        "X-NOTPUNKS-Bridge-Token": token,
     }
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     conn.request("POST", path, body=json.dumps(body or {}), headers=headers)
@@ -140,8 +151,9 @@ def test_local_bridge_status(monkeypatch):
         assert headers["Access-Control-Allow-Origin"] == "https://app.notpunks.com"
         assert payload["skills"][0]["skillId"] == "alpha"
         assert payload["bridgeTokenHeader"] == "X-NOTPUNKS-Bridge-Token"
-        assert len(payload["bridgeToken"]) >= 32
-        assert payload["scopedBridgeToken"].startswith("npbt1.")
+        assert payload["pairingRequired"] is True
+        assert "bridgeToken" not in payload
+        assert "scopedBridgeToken" not in payload
         assert "skill:install" in payload["bridgeTokenScopes"]
     finally:
         handle.stop()
@@ -261,22 +273,84 @@ def test_local_bridge_rejects_mutation_without_pairing_token(monkeypatch):
         handle.stop()
 
 
+def test_local_bridge_pairs_browser_before_mutation(monkeypatch):
+    from hermes_cli.local_bridge import approve_pairing_request, start_local_bridge
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/pairing/request",
+            body={"scopes": ["skill:install", "skill:publish"]},
+            origin="https://skilzzz.com",
+            bridge_token=False,
+        )
+        assert status == 202
+        assert payload["request"]["status"] == "pending"
+        assert payload["request"]["approveCommand"].startswith("/marketplace bridge pair approve ")
+        request_id = payload["request"]["id"]
+
+        approved = approve_pairing_request(request_id)
+        assert approved is not None
+        assert approved["scopedBridgeToken"].startswith("npbt1.")
+
+        status, _headers, payload = _request(
+            handle.port,
+            "GET",
+            f"/api/skills/marketplace/pairing/request/{request_id}",
+            origin="https://skilzzz.com",
+            bridge_token=False,
+        )
+        assert status == 200
+        assert payload["request"]["status"] == "approved"
+        assert payload["request"]["scopedBridgeToken"].startswith("npbt1.")
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_rejects_raw_root_token_for_mutation(monkeypatch):
+    from hermes_cli.local_bridge import _get_bridge_token, start_local_bridge
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/install",
+            body={"name": "alpha"},
+            bridge_token=_get_bridge_token(),
+        )
+        assert status == 401
+        assert payload["error"] == "Bridge pairing token is required"
+    finally:
+        handle.stop()
+
+
 def test_local_bridge_rejects_scoped_token_without_required_scope(monkeypatch):
     from hermes_cli.local_bridge import start_local_bridge
 
     handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
     assert handle is not None
     try:
-        status, _headers, token_payload = _request(
+        status, _headers, pairing_payload = _request(
             handle.port,
-            "GET",
-            "/api/skills/marketplace/status",
+            "POST",
+            "/api/skills/marketplace/pairing/request",
+            body={},
             origin="https://agent.notpunks.com",
             bridge_token=False,
         )
-        assert status == 200
+        assert status == 202
+        request_id = pairing_payload["request"]["id"]
+        from hermes_cli.local_bridge import approve_pairing_request
+
+        token_payload = approve_pairing_request(request_id)
+        assert token_payload is not None
         assert token_payload["scopedBridgeToken"].startswith("npbt1.")
-        assert "skill:install" not in token_payload["bridgeTokenScopes"]
+        assert "skill:install" not in token_payload["scopes"]
         status, _headers, payload = _request(
             handle.port,
             "POST",
@@ -1088,6 +1162,8 @@ def test_local_bridge_install_request_callback(monkeypatch):
     event = threading.Event()
 
     def on_install_request(request):
+        if request.get("event") == "pairing_request":
+            return
         seen.append(request)
         event.set()
 
