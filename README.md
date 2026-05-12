@@ -15,7 +15,7 @@
   &nbsp;&nbsp;|&nbsp;&nbsp;
   <a href="https://skilzzz.com/"><strong>Skill Marketplace</strong></a>
   &nbsp;&nbsp;|&nbsp;&nbsp;
-  <a href="https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.12"><strong>Latest Release</strong></a>
+  <a href="https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v2026.5.12"><strong>Latest Release</strong></a>
 </p>
 
 <p align="center">
@@ -70,11 +70,11 @@ irm https://agent.notpunks.com/install.ps1 | iex
 Prefer fixed release archives instead of a remote installer:
 
 ```text
-Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/NOTPUNKS-Agent-0.11.12-linux-x64.tar.gz
-macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/NOTPUNKS-Agent-0.11.12-macos-arm64.tar.gz
-Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/NOTPUNKS-Agent-0.11.12-windows-wsl.zip
-Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/checksums.txt
-Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v0.11.12/build-hashes.txt
+Linux x64:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v2026.5.12/NOTPUNKS-Agent-2026.5.12-linux-x64.tar.gz
+macOS ARM64:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v2026.5.12/NOTPUNKS-Agent-2026.5.12-macos-arm64.tar.gz
+Windows WSL:  https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v2026.5.12/NOTPUNKS-Agent-2026.5.12-windows-wsl.zip
+Checksums:    https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v2026.5.12/checksums.txt
+Build hashes: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/download/v2026.5.12/build-hashes.txt
 ```
 
 Start the agent:
@@ -345,7 +345,7 @@ If marketplace install is blocked by security scan, inspect the finding first. C
 - Docs: https://agent.notpunks.com/docs
 - Marketplace: https://skilzzz.com/
 - sNFT Protocol: https://snft.notpunks.com/
-- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v0.11.12
+- Latest release: https://github.com/notpunksdev/NOTPUNKS-Agent/releases/tag/v2026.5.12
 - Ecosystem site: https://notpunks.com/
 
 ## License
