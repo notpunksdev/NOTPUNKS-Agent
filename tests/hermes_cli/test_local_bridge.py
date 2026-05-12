@@ -376,6 +376,11 @@ def test_local_bridge_install(monkeypatch):
         "access": {"policy": "license"},
         "bundleHash": "sha256:test",
     })
+    monkeypatch.setattr(skill_marketplace, "fetch_marketplace_wallet_license", lambda name, wallet: {
+        "skillId": name,
+        "walletAddress": wallet,
+        "nftAddress": "0:test",
+    })
     monkeypatch.setattr(skill_marketplace, "check_skill_access", lambda ctx, listing: (True, "ok"))
     monkeypatch.setattr(skill_marketplace, "install_marketplace_skill", lambda name, **kwargs: {
         "name": name,
@@ -476,6 +481,11 @@ def test_local_bridge_signed_install_uses_marketplace_wallet_without_local_walle
         "access": {"policy": "license"},
         "bundleHash": "sha256:test",
     })
+    monkeypatch.setattr(skill_marketplace, "fetch_marketplace_wallet_license", lambda name, wallet: {
+        "skillId": name,
+        "walletAddress": wallet,
+        "nftAddress": "0:test",
+    })
     monkeypatch.setattr(skill_marketplace, "install_marketplace_skill", lambda name, **kwargs: {
         "name": name,
         "path": name,
@@ -537,11 +547,57 @@ def test_local_bridge_signed_install_uses_marketplace_wallet_without_local_walle
         assert result_event.wait(2)
         assert seen_results[0]["ok"] is True
         assert seen_results[0]["name"] == "alpha"
+    finally:
+        handle.stop()
 
-        from hermes_cli.config import load_config
 
-        assert load_config()["wallet"]["address"] == "EQwallet"
-        assert load_config()["wallet"]["verified"] is True
+def test_local_bridge_signed_install_rejects_wallet_without_marketplace_license(monkeypatch):
+    import agent.wallet.context as wallet_context
+    import hermes_cli.skill_marketplace as skill_marketplace
+    from hermes_cli.local_bridge import approve_install_request, start_local_bridge
+
+    monkeypatch.setattr(wallet_context, "build_wallet_context", lambda: None)
+    monkeypatch.setattr(skill_marketplace, "fetch_remote_listing", lambda name: {
+        "skillId": name,
+        "access": {"policy": "license"},
+        "bundleHash": "sha256:test",
+    })
+    monkeypatch.setattr(skill_marketplace, "fetch_marketplace_wallet_license", lambda name, wallet: None)
+
+    body = {
+        "name": "alpha",
+        "walletAddress": "EQwallet",
+        "metadataUrl": "https://app.notpunks.com/api/skills/marketplace/alpha/metadata",
+        "expectedBundleHash": "sha256:test",
+        "mode": "install",
+        "requireWalletSignature": True,
+        "walletSignature": _opaque_install_signature(
+            bundle_hash="sha256:test",
+            metadata_url="https://app.notpunks.com/api/skills/marketplace/alpha/metadata",
+        ),
+    }
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/install",
+            body=body,
+        )
+        assert status == 202
+        approve_install_request(payload["requestId"])
+        body["requestId"] = payload["requestId"]
+
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/install",
+            body=body,
+        )
+        assert status == 403
+        assert "does not own" in payload["error"]
     finally:
         handle.stop()
 

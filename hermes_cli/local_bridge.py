@@ -695,26 +695,6 @@ def _validate_install_wallet_signature(body: dict[str, Any]) -> tuple[bool, str]
     return True, "ok"
 
 
-def _persist_signed_marketplace_wallet(address: str) -> None:
-    address = str(address or "").strip()
-    if not address:
-        return
-    try:
-        from hermes_cli.config import load_config, save_config
-
-        config = load_config()
-        config.setdefault("wallet", {})
-        config["wallet"]["address"] = address
-        config["wallet"]["network"] = config["wallet"].get("network") or "mainnet"
-        config["wallet"]["verified"] = True
-        config["wallet"]["connected_at"] = time.time()
-        config["wallet"].setdefault("public_key", "")
-        config["wallet"].setdefault("device_info", {})
-        save_config(config)
-    except Exception:
-        return
-
-
 def list_install_requests() -> list[dict[str, Any]]:
     _prune_pending()
     with _PENDING_LOCK:
@@ -1932,9 +1912,11 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
     from agent.wallet.context import build_wallet_context
     from hermes_cli.skill_marketplace import (
         check_skill_access,
+        fetch_marketplace_wallet_license,
         fetch_remote_listing,
         install_marketplace_skill,
         list_installed_marketplace_skills,
+        normalize_marketplace_listing,
     )
 
     skill_name = str(body.get("name") or "").strip()
@@ -2005,7 +1987,6 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
 
     ctx = build_wallet_context()
     if not ctx and require_wallet_signature and requested_wallet:
-        _persist_signed_marketplace_wallet(requested_wallet)
         ctx = SimpleNamespace(
             wallet_address=requested_wallet,
             network="mainnet",
@@ -2037,6 +2018,7 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
 
     try:
         listing = fetch_remote_listing(skill_name)
+        normalized_listing = normalize_marketplace_listing(listing)
         listing_bundle_hash = str(
             listing.get("bundleHash")
             or listing.get("bundle_hash")
@@ -2049,6 +2031,36 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
                 "ok": False,
                 "error": "Marketplace listing hash does not match install intent",
             }, HTTPStatus.CONFLICT
+        access = normalized_listing.get("access") if isinstance(normalized_listing.get("access"), dict) else {}
+        policy = str(access.get("policy") or "holders").lower()
+        if require_wallet_signature and requested_wallet and policy in {"license", "skill_nft"}:
+            license_item = fetch_marketplace_wallet_license(skill_name, requested_wallet)
+            if not license_item:
+                _notify_install_result(
+                    request_id,
+                    skill_name,
+                    ok=False,
+                    message="Signed Skilzzz wallet does not own this Skill NFT license",
+                )
+                return {
+                    "ok": False,
+                    "error": "Signed Skilzzz wallet does not own this Skill NFT license",
+                }, HTTPStatus.FORBIDDEN
+            ctx = SimpleNamespace(
+                wallet_address=requested_wallet,
+                network="mainnet",
+                verified=True,
+                skill_licenses={
+                    str(normalized_listing.get("skill_id") or skill_name): {
+                        **license_item,
+                        "source": "marketplace_license_check",
+                        "walletAddress": requested_wallet,
+                    }
+                },
+                can_use_custom_skills=False,
+                can_create_skills=False,
+                access_roles=["signed_wallet", "skill_license_holder"],
+            )
         allowed, reason = check_skill_access(ctx, listing)
     except Exception as exc:
         _notify_install_result(request_id, skill_name, ok=False, message=f"Marketplace access check failed: {exc}")

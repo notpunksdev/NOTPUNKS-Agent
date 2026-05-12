@@ -862,6 +862,33 @@ def fetch_marketplace_listing(skill_name: str, base_url: str = "https://app.notp
     raise FileNotFoundError(f"Marketplace skill not found: {skill_name}")
 
 
+def fetch_marketplace_wallet_license(
+    skill_name: str,
+    wallet_address: str,
+    base_url: str = "https://app.notpunks.com",
+) -> dict[str, Any] | None:
+    """Return the marketplace license for a wallet/skill pair, if the backend reports one."""
+    import httpx
+
+    wanted = _slug(skill_name)
+    wallet = str(wallet_address or "").strip()
+    if not wanted or not wallet:
+        return None
+    url = _marketplace_api_base(base_url) + f"/licenses/{wallet}"
+    response = httpx.get(url, timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+    licenses = (((payload or {}).get("data") or {}).get("licenses") or [])
+    if not isinstance(licenses, list):
+        return None
+    for license_item in licenses:
+        if not isinstance(license_item, dict):
+            continue
+        if _slug(str(license_item.get("skillId") or license_item.get("name") or "")) == wanted:
+            return license_item
+    return None
+
+
 def _metadata_url_from_listing(listing: dict[str, Any], base_url: str, skill_id: str) -> str:
     metadata_url = str(listing.get("nftMetadataUrl") or "")
     if not metadata_url:
