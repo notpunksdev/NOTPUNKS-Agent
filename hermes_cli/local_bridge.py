@@ -2120,7 +2120,13 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
 
 
 def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], int]:
-    from hermes_cli.skill_marketplace import list_installed_marketplace_skills, uninstall_marketplace_skill
+    from hermes_cli.skill_marketplace import (
+        fetch_marketplace_wallet_license,
+        fetch_remote_listing,
+        list_installed_marketplace_skills,
+        normalize_marketplace_listing,
+        uninstall_marketplace_skill,
+    )
 
     skill_name = str(body.get("name") or "").strip()
     if not skill_name:
@@ -2190,6 +2196,22 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
     if not approved_payload_matches:
         _notify_install_result(request_id, skill_name, ok=False, message="Uninstall request does not match approved payload")
         return {"ok": False, "error": "Uninstall request does not match approved payload"}, HTTPStatus.BAD_REQUEST
+
+    if require_wallet_signature and requested_wallet:
+        try:
+            listing = normalize_marketplace_listing(fetch_remote_listing(skill_name))
+            access = listing.get("access") if isinstance(listing.get("access"), dict) else {}
+            policy = str(access.get("policy") or "holders").lower()
+            if policy in {"license", "skill_nft"}:
+                license_item = fetch_marketplace_wallet_license(skill_name, requested_wallet)
+                if not license_item:
+                    message = "Signed Skilzzz wallet does not own this Skill NFT license"
+                    _notify_install_result(request_id, skill_name, ok=False, message=message)
+                    return {"ok": False, "error": message}, HTTPStatus.FORBIDDEN
+        except Exception as exc:
+            message = f"Marketplace license check failed: {exc}"
+            _notify_install_result(request_id, skill_name, ok=False, message=message)
+            return {"ok": False, "error": message}, HTTPStatus.BAD_GATEWAY
 
     try:
         result = uninstall_marketplace_skill(skill_name)

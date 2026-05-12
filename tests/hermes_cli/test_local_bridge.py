@@ -1295,6 +1295,15 @@ def test_local_bridge_uninstall_marketplace_skill(monkeypatch):
     from hermes_cli.local_bridge import approve_install_request, start_local_bridge
 
     calls = []
+    monkeypatch.setattr(skill_marketplace, "fetch_remote_listing", lambda name: {
+        "skillId": name,
+        "access": {"policy": "license"},
+    })
+    monkeypatch.setattr(skill_marketplace, "fetch_marketplace_wallet_license", lambda name, wallet: {
+        "skillId": name,
+        "walletAddress": wallet,
+        "nftAddress": "0:test",
+    })
     monkeypatch.setattr(skill_marketplace, "uninstall_marketplace_skill", lambda name: calls.append(name) or {
         "name": name,
         "skillId": name,
@@ -1357,6 +1366,15 @@ def test_local_bridge_executes_approved_uninstall_request(monkeypatch):
     from hermes_cli.local_bridge import approve_install_request, execute_approved_install_request, start_local_bridge
 
     calls = []
+    monkeypatch.setattr(skill_marketplace, "fetch_remote_listing", lambda name: {
+        "skillId": name,
+        "access": {"policy": "license"},
+    })
+    monkeypatch.setattr(skill_marketplace, "fetch_marketplace_wallet_license", lambda name, wallet: {
+        "skillId": name,
+        "walletAddress": wallet,
+        "nftAddress": "0:test",
+    })
     monkeypatch.setattr(skill_marketplace, "uninstall_marketplace_skill", lambda name: calls.append(name) or {
         "name": name,
         "skillId": name,
@@ -1405,6 +1423,60 @@ def test_local_bridge_executes_approved_uninstall_request(monkeypatch):
         assert payload["ok"] is True
         assert payload["uninstalled"]["skillId"] == "alpha"
         assert calls == ["alpha"]
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_uninstall_rejects_wallet_without_marketplace_license(monkeypatch):
+    import hermes_cli.skill_marketplace as skill_marketplace
+    from hermes_cli.local_bridge import approve_install_request, start_local_bridge
+
+    calls = []
+    monkeypatch.setattr(skill_marketplace, "fetch_remote_listing", lambda name: {
+        "skillId": name,
+        "access": {"policy": "license"},
+    })
+    monkeypatch.setattr(skill_marketplace, "fetch_marketplace_wallet_license", lambda name, wallet: None)
+    monkeypatch.setattr(skill_marketplace, "uninstall_marketplace_skill", lambda name: calls.append(name) or {
+        "name": name,
+        "skillId": name,
+        "path": name,
+        "message": f"Uninstalled {name}",
+    })
+
+    handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "DELETE",
+            "/api/skills/marketplace/install",
+            body={
+                "name": "alpha",
+                "walletAddress": "EQwallet",
+                "requireWalletSignature": True,
+                "walletSignature": _opaque_install_signature(mode="uninstall"),
+            },
+        )
+        assert status == 202
+        request_id = payload["requestId"]
+        assert approve_install_request(request_id)["status"] == "approved"
+
+        status, _headers, payload = _request(
+            handle.port,
+            "DELETE",
+            "/api/skills/marketplace/install",
+            body={
+                "name": "alpha",
+                "requestId": request_id,
+                "walletAddress": "EQwallet",
+                "requireWalletSignature": True,
+                "walletSignature": _opaque_install_signature(mode="uninstall"),
+            },
+        )
+        assert status == 403
+        assert "does not own" in payload["error"]
+        assert calls == []
     finally:
         handle.stop()
 
