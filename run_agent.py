@@ -1438,6 +1438,22 @@ class AIAgent:
                         "configuration."
                     )
             
+            _resolved_base = str(client_kwargs.get("base_url", "") or "")
+            _resolved_key = str(client_kwargs.get("api_key", "") or "").strip()
+            if base_url_host_matches(_resolved_base, "openrouter.ai"):
+                try:
+                    from hermes_cli.auth import has_usable_secret as _has_usable_secret
+                except Exception:
+                    def _has_usable_secret(value, *, min_length=4):  # type: ignore
+                        return bool(str(value or "").strip())
+                if not _has_usable_secret(_resolved_key):
+                    raise RuntimeError(
+                        "OpenRouter is selected but OPENROUTER_API_KEY is not configured. "
+                        "OpenRouter ':free' models still require an API key for the "
+                        "Authorization header. Run `notpunks setup` or set "
+                        "OPENROUTER_API_KEY in ~/.notpunks/.env."
+                    )
+
             self._client_kwargs = client_kwargs  # stored for rebuilding after interrupt
 
             # Enable fine-grained tool streaming for Claude on OpenRouter.
