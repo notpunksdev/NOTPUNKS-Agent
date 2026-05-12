@@ -11,5 +11,5 @@ Provides subcommands for:
 - notpunks cron          - Manage cron jobs
 """
 
-__version__ = "0.11.13"
-__release_date__ = "2026.5.12"
+__version__ = "0.11.14"
+__release_date__ = "2026.5.12.2"
