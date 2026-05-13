@@ -6551,11 +6551,11 @@ class HermesCLI:
                     if address and address != seen_address:
                         seen_address = address
                         # Give the wallet callback write a moment to settle, then
-                        # force a live NFT check so the gate opens without requiring
-                        # the user to type /wallet status.
+                        # refresh the gate quietly. /wallet status remains the
+                        # explicit command for verbose NFT access output.
                         time.sleep(0.5)
                         self.config = config
-                        self._refresh_wallet_access_gate(prompt_connect=False, force_refresh=True, quiet=False)
+                        self._refresh_wallet_access_gate(prompt_connect=False, force_refresh=False, quiet=True)
                         return
                 except Exception:
                     pass
@@ -6593,7 +6593,7 @@ class HermesCLI:
                 self._output_console(),
                 prompt_connect=prompt_connect,
                 require_not_punks=True,
-                reset_on_start=bool(prompt_connect and wallet_cfg.get("reset_on_start", True)),
+                reset_on_start=bool(prompt_connect and wallet_cfg.get("reset_on_start", False)),
                 force_refresh=force_refresh,
                 quiet=quiet,
             )
