@@ -403,12 +403,31 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def _local_wallet_summary() -> dict[str, Any]:
+    raw_summary = {"connected": False, "address": "", "network": "", "canCreateSkills": False, "canPublishSkills": False}
+    try:
+        from hermes_cli.config import load_config
+
+        config = load_config()
+        wallet = config.get("wallet") if isinstance(config, dict) else {}
+        wallet = wallet if isinstance(wallet, dict) else {}
+        address = str(wallet.get("address") or "").strip()
+        raw_summary = {
+            "connected": bool(address),
+            "address": address,
+            "network": str(wallet.get("network") or "").strip(),
+            "canCreateSkills": False,
+            "canPublishSkills": False,
+        }
+    except Exception:
+        pass
     try:
         from agent.wallet.context import build_not_punks_holder_context, build_wallet_context
 
         ctx = build_wallet_context()
     except Exception:
         ctx = None
+    if not ctx:
+        return raw_summary
     if ctx and not bool(getattr(ctx, "can_create_skills", False)):
         try:
             beta_ctx = build_not_punks_holder_context()
@@ -419,34 +438,15 @@ def _local_wallet_summary() -> dict[str, Any]:
             ctx.can_use_custom_skills = True
             ctx.access_roles = sorted(set(list(getattr(ctx, "access_roles", []) or []) + list(getattr(beta_ctx, "access_roles", []) or [])))
             ctx.access_tiers = sorted(set(list(getattr(ctx, "access_tiers", []) or []) + list(getattr(beta_ctx, "access_tiers", []) or [])))
-    if ctx:
-        return {
-            "connected": bool(getattr(ctx, "wallet_address", "")),
-            "address": str(getattr(ctx, "wallet_address", "") or "").strip(),
-            "network": str(getattr(ctx, "network", "") or "").strip(),
-            "canCreateSkills": bool(getattr(ctx, "can_create_skills", False)),
-            "canPublishSkills": bool(getattr(ctx, "can_publish_skills", False)),
-            "roles": list(getattr(ctx, "access_roles", []) or []),
-            "tiers": list(getattr(ctx, "access_tiers", []) or []),
-            "matchingPairs": list(getattr(ctx, "matching_pair_numbers", []) or []),
-        }
-    try:
-        from hermes_cli.config import load_config
-    except Exception:
-        return {"connected": False, "address": "", "network": "", "canCreateSkills": False, "canPublishSkills": False}
-    try:
-        config = load_config()
-    except Exception:
-        return {"connected": False, "address": "", "network": "", "canCreateSkills": False, "canPublishSkills": False}
-    wallet = config.get("wallet") if isinstance(config, dict) else {}
-    wallet = wallet if isinstance(wallet, dict) else {}
-    address = str(wallet.get("address") or "").strip()
     return {
-        "connected": bool(address),
-        "address": address,
-        "network": str(wallet.get("network") or "").strip(),
-        "canCreateSkills": False,
-        "canPublishSkills": False,
+        "connected": bool(getattr(ctx, "wallet_address", "") or raw_summary["address"]),
+        "address": str(getattr(ctx, "wallet_address", "") or raw_summary["address"]).strip(),
+        "network": str(getattr(ctx, "network", "") or raw_summary["network"]).strip(),
+        "canCreateSkills": bool(getattr(ctx, "can_create_skills", False)),
+        "canPublishSkills": bool(getattr(ctx, "can_publish_skills", False)),
+        "roles": list(getattr(ctx, "access_roles", []) or []),
+        "tiers": list(getattr(ctx, "access_tiers", []) or []),
+        "matchingPairs": list(getattr(ctx, "matching_pair_numbers", []) or []),
     }
 
 
@@ -496,6 +496,12 @@ def create_pairing_request(body: dict[str, Any] | None = None, *, origin: str = 
     wallet_address = str(body.get("walletAddress") or "").strip()
     if not wallet_address:
         raise ValueError("Pairing requires the currently connected marketplace wallet.")
+    local_wallet = _local_wallet_summary()
+    local_wallet_address = str(local_wallet.get("address") or "").strip()
+    if not local_wallet_address:
+        raise ValueError("Pairing requires a wallet connected in NOTPUNKS Agent. Run /wallet connect in the agent first.")
+    if not _same_ton_address(local_wallet_address, wallet_address):
+        raise ValueError("Pairing wallet mismatch. Connect the same TON wallet on Skilzzz and in NOTPUNKS Agent.")
     allowed_scopes = _scopes_for_origin(origin)
     requested = body.get("scopes")
     if isinstance(requested, list):
@@ -976,6 +982,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "agentReachable": True,
                 "paired": False,
+                "wallet": _local_wallet_summary(),
                 "skills": [],
                 "total": 0,
                 "publicUrl": str(getattr(self.server, "notpunks_public_url", "") or ""),

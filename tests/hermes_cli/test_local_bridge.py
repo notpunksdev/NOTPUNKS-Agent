@@ -5,7 +5,21 @@ import threading
 from types import SimpleNamespace
 
 
+def _set_agent_wallet(monkeypatch, wallet="EQwallet"):
+    import hermes_cli.local_bridge as local_bridge
+
+    monkeypatch.setattr(
+        local_bridge,
+        "_local_wallet_summary",
+        lambda: {"connected": True, "address": wallet, "publicKey": "", "network": "mainnet"},
+    )
+
+
 def _pairing_token(port: int, *, origin="https://app.notpunks.com", scopes=None, wallet="EQwallet") -> str:
+    import hermes_cli.local_bridge as local_bridge
+
+    original_wallet_summary = local_bridge._local_wallet_summary
+    local_bridge._local_wallet_summary = lambda: {"connected": True, "address": wallet, "publicKey": "", "network": "mainnet"}
     status, _headers, payload = _request(
         port,
         "POST",
@@ -14,21 +28,24 @@ def _pairing_token(port: int, *, origin="https://app.notpunks.com", scopes=None,
         origin=origin,
         bridge_token=False,
     )
-    assert status == 202
-    request_id = payload["request"]["id"]
-    from hermes_cli.local_bridge import approve_pairing_request
+    try:
+        assert status == 202
+        request_id = payload["request"]["id"]
+        from hermes_cli.local_bridge import approve_pairing_request
 
-    approved = approve_pairing_request(request_id)
-    assert approved is not None
-    status, _headers, payload = _request(
-        port,
-        "GET",
-        f"/api/skills/marketplace/pairing/request/{request_id}",
-        origin=origin,
-        bridge_token=False,
-    )
-    assert status == 200
-    return payload["request"]["scopedBridgeToken"]
+        approved = approve_pairing_request(request_id)
+        assert approved is not None
+        status, _headers, payload = _request(
+            port,
+            "GET",
+            f"/api/skills/marketplace/pairing/request/{request_id}",
+            origin=origin,
+            bridge_token=False,
+        )
+        assert status == 200
+        return payload["request"]["scopedBridgeToken"]
+    finally:
+        local_bridge._local_wallet_summary = original_wallet_summary
 
 
 def _request(
@@ -279,6 +296,7 @@ def test_local_bridge_rejects_mutation_without_pairing_token(monkeypatch):
 def test_local_bridge_pairs_browser_before_mutation(monkeypatch):
     from hermes_cli.local_bridge import approve_pairing_request, start_local_bridge
 
+    _set_agent_wallet(monkeypatch)
     handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
     assert handle is not None
     try:
@@ -313,6 +331,52 @@ def test_local_bridge_pairs_browser_before_mutation(monkeypatch):
         handle.stop()
 
 
+def test_local_bridge_rejects_pairing_without_agent_wallet(monkeypatch):
+    import hermes_cli.local_bridge as local_bridge
+
+    monkeypatch.setattr(
+        local_bridge,
+        "_local_wallet_summary",
+        lambda: {"connected": False, "address": "", "publicKey": "", "network": ""},
+    )
+    handle = local_bridge.start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/pairing/request",
+            body={"walletAddress": "EQwallet"},
+            origin="https://skilzzz.com",
+            bridge_token=False,
+        )
+        assert status == 403
+        assert "wallet connected in NOTPUNKS Agent" in payload["error"]
+    finally:
+        handle.stop()
+
+
+def test_local_bridge_rejects_pairing_with_different_agent_wallet(monkeypatch):
+    import hermes_cli.local_bridge as local_bridge
+
+    _set_agent_wallet(monkeypatch, wallet="EQother")
+    handle = local_bridge.start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
+    assert handle is not None
+    try:
+        status, _headers, payload = _request(
+            handle.port,
+            "POST",
+            "/api/skills/marketplace/pairing/request",
+            body={"walletAddress": "EQwallet"},
+            origin="https://skilzzz.com",
+            bridge_token=False,
+        )
+        assert status == 403
+        assert "wallet mismatch" in payload["error"]
+    finally:
+        handle.stop()
+
+
 def test_local_bridge_rejects_raw_root_token_for_mutation(monkeypatch):
     from hermes_cli.local_bridge import _get_bridge_token, start_local_bridge
 
@@ -335,6 +399,7 @@ def test_local_bridge_rejects_raw_root_token_for_mutation(monkeypatch):
 def test_local_bridge_rejects_scoped_token_without_required_scope(monkeypatch):
     from hermes_cli.local_bridge import start_local_bridge
 
+    _set_agent_wallet(monkeypatch)
     handle = start_local_bridge({"marketplace": {"local_bridge": {"enabled": True, "port": 0}}})
     assert handle is not None
     try:
