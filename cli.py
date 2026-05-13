@@ -6520,8 +6520,11 @@ class HermesCLI:
         # Use web-based connect inside prompt_toolkit so the UI doesn't freeze
         if action == "connect":
             try:
+                wallet_cfg = self.config.get("wallet", {}) if isinstance(self.config.get("wallet", {}), dict) else {}
+                had_wallet = bool(str(wallet_cfg.get("address") or "").strip())
                 _wallet_connect(console=ChatConsole(), web=True, blocking=False)
-                self._watch_wallet_connect_gate_refresh()
+                if not had_wallet:
+                    self._watch_wallet_connect_gate_refresh()
             except SystemExit:
                 pass
             return
