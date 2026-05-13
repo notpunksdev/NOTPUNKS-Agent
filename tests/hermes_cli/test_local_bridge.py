@@ -5,12 +5,12 @@ import threading
 from types import SimpleNamespace
 
 
-def _pairing_token(port: int, *, origin="https://app.notpunks.com", scopes=None) -> str:
+def _pairing_token(port: int, *, origin="https://app.notpunks.com", scopes=None, wallet="EQwallet") -> str:
     status, _headers, payload = _request(
         port,
         "POST",
         "/api/skills/marketplace/pairing/request",
-        body={"scopes": scopes or []} if scopes is not None else {},
+        body={"walletAddress": wallet, "scopes": scopes or []} if scopes is not None else {"walletAddress": wallet},
         origin=origin,
         bridge_token=False,
     )
@@ -45,10 +45,11 @@ def _request(
     headers = dict(headers or {})
     if origin is not None:
         headers["Origin"] = origin
+    headers.setdefault("X-NOTPUNKS-Wallet-Address", "EQwallet")
     if body is not None:
         headers["Content-Type"] = "application/json"
         body = json.dumps(body)
-    if method in {"POST", "DELETE"} and bridge_token is True:
+    if bridge_token is True and not path.startswith("/api/skills/marketplace/pairing/request"):
         headers["X-NOTPUNKS-Bridge-Token"] = _pairing_token(port, origin=origin)
     elif isinstance(bridge_token, str):
         headers["X-NOTPUNKS-Bridge-Token"] = bridge_token
@@ -72,6 +73,7 @@ def _stream_request(
         "Origin": origin,
         "Content-Type": "application/json",
         "X-NOTPUNKS-Bridge-Token": token,
+        "X-NOTPUNKS-Wallet-Address": "EQwallet",
     }
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     conn.request("POST", path, body=json.dumps(body or {}), headers=headers)
@@ -247,6 +249,7 @@ def test_local_bridge_rejects_unknown_origin(monkeypatch):
             "GET",
             "/api/skills/marketplace/status",
             origin="https://example.com",
+            bridge_token=False,
         )
         assert status == 403
         assert payload["error"] == "Origin not allowed"
@@ -283,7 +286,7 @@ def test_local_bridge_pairs_browser_before_mutation(monkeypatch):
             handle.port,
             "POST",
             "/api/skills/marketplace/pairing/request",
-            body={"scopes": ["skill:install", "skill:publish"]},
+            body={"walletAddress": "EQwallet", "scopes": ["skill:install", "skill:publish"]},
             origin="https://skilzzz.com",
             bridge_token=False,
         )
@@ -339,7 +342,7 @@ def test_local_bridge_rejects_scoped_token_without_required_scope(monkeypatch):
             handle.port,
             "POST",
             "/api/skills/marketplace/pairing/request",
-            body={},
+            body={"walletAddress": "EQwallet"},
             origin="https://agent.notpunks.com",
             bridge_token=False,
         )
@@ -804,7 +807,7 @@ def test_local_bridge_skill_wizard_chat_streams_local_agent_reply(monkeypatch):
         handle.stop()
 
 
-def test_local_bridge_skill_wizard_streams_reasoning_events(monkeypatch):
+def test_local_bridge_skill_wizard_suppresses_reasoning_events(monkeypatch):
     import agent.wallet.context as wallet_context
     import hermes_cli.local_bridge as local_bridge
     from hermes_cli.local_bridge import start_local_bridge
@@ -816,9 +819,9 @@ def test_local_bridge_skill_wizard_streams_reasoning_events(monkeypatch):
         matching_pair_numbers=[7],
     ))
 
-    def fake_stream(_prompt, *, on_status, on_delta, on_reasoning):
+    def fake_stream(_prompt, *, on_status, on_delta, on_reasoning=None):
         assert on_status("thinking")
-        assert on_reasoning("Analyzing the skill idea...")
+        assert on_reasoning is None
         assert on_delta("Какой результат")
         return json.dumps({
             "reply": "Какой результат должен проверять skill?",
@@ -843,14 +846,14 @@ def test_local_bridge_skill_wizard_streams_reasoning_events(monkeypatch):
             origin="https://skilzzz.com",
         )
         assert status == 200
-        assert any(event.get("type") == "reasoning" and "Analyzing" in event.get("delta", "") for event in events)
+        assert not any(event.get("type") == "reasoning" for event in events)
         assert any(event.get("type") == "delta" and "Какой результат" in event.get("delta", "") for event in events)
         assert events[-1]["type"] == "done"
     finally:
         handle.stop()
 
 
-def test_local_bridge_skill_wizard_chat_falls_back_when_agent_times_out(monkeypatch):
+def test_local_bridge_skill_wizard_chat_returns_timeout_error(monkeypatch):
     import agent.wallet.context as wallet_context
     import hermes_cli.local_bridge as local_bridge
     from hermes_cli.local_bridge import start_local_bridge
@@ -881,20 +884,15 @@ def test_local_bridge_skill_wizard_chat_falls_back_when_agent_times_out(monkeypa
             },
             origin="https://skilzzz.com",
         )
-        assert status == 200
-        assert payload["ok"] is True
-        assert payload["done"] is False
-        assert payload["agentFallback"] is True
-        assert "запасной ответ bridge" in payload["reply"]
-        assert "farm.notpunks.com" in payload["reply"]
-        assert "APY" in payload["reply"]
-        assert "Polymarket" not in payload["reply"]
+        assert status == 504
+        assert payload["ok"] is False
+        assert "Local agent did not answer within 75s" in payload["error"]
         assert payload["walletAddress"] == "EQcreator"
     finally:
         handle.stop()
 
 
-def test_local_bridge_skill_wizard_chat_falls_back_on_empty_agent_reply(monkeypatch):
+def test_local_bridge_skill_wizard_chat_errors_on_empty_agent_reply(monkeypatch):
     import agent.wallet.context as wallet_context
     import hermes_cli.local_bridge as local_bridge
     from hermes_cli.local_bridge import start_local_bridge
@@ -921,12 +919,10 @@ def test_local_bridge_skill_wizard_chat_falls_back_on_empty_agent_reply(monkeypa
             },
             origin="https://skilzzz.com",
         )
-        assert status == 200
-        assert payload["ok"] is True
-        assert payload["done"] is False
-        assert payload["agentFallback"] is True
-        assert "bridge fallback" in payload["reply"]
-        assert "model response" in payload["reply"]
+        assert status == 502
+        assert payload["ok"] is False
+        assert payload["error"] == "Local agent returned an empty wizard reply"
+        assert payload["walletAddress"] == "EQcreator"
     finally:
         handle.stop()
 

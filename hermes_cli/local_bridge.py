@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9119
 BRIDGE_TOKEN_HEADER = "X-NOTPUNKS-Bridge-Token"
+BRIDGE_WALLET_HEADER = "X-NOTPUNKS-Wallet-Address"
 ALLOWED_ORIGINS = {
     "https://app.notpunks.com",
     "https://agent.notpunks.com",
@@ -41,9 +42,11 @@ _PENDING_PAIRINGS: dict[str, dict[str, Any]] = {}
 _PENDING_LOCK = threading.Lock()
 _RATE_LIMITS: dict[tuple[str, str, str], list[float]] = {}
 _RATE_LIMIT_LOCK = threading.Lock()
+_USED_SIGNATURE_CHALLENGES: dict[str, float] = {}
+_USED_SIGNATURE_LOCK = threading.Lock()
 _REQUEST_TTL_SECONDS = 600
 _INSTALL_SIGNATURE_TTL_SECONDS = 600
-_SCOPED_TOKEN_TTL_SECONDS = 6 * 60 * 60
+_SCOPED_TOKEN_TTL_SECONDS = 12 * 60 * 60
 _INSTALL_REQUEST_CALLBACK: Callable[[dict[str, Any]], None] | None = None
 
 _PATH_SCOPES = {
@@ -56,16 +59,19 @@ _PATH_SCOPES = {
     ("DELETE", "/api/skills/marketplace/install"): "skill:uninstall",
 }
 
+_SKILZZZ_SCOPES = {"bridge:status", "wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"}
+_LOCAL_DEV_SCOPES = set(_SKILZZZ_SCOPES)
+
 _ORIGIN_SCOPES = {
-    "https://skilzzz.com": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
-    "https://www.skilzzz.com": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+    "https://skilzzz.com": set(_SKILZZZ_SCOPES),
+    "https://www.skilzzz.com": set(_SKILZZZ_SCOPES),
     "https://agent.notpunks.com": {"wallet:status"},
     "https://www.agent.notpunks.com": {"wallet:status"},
-    "https://app.notpunks.com": {"skill:install", "skill:uninstall"},
-    "http://localhost:3000": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
-    "http://127.0.0.1:3000": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
-    "http://localhost:3004": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
-    "http://127.0.0.1:3004": {"wizard:chat", "skill:scan", "skill:draft", "skill:publish", "skill:install", "skill:uninstall"},
+    "https://app.notpunks.com": {"bridge:status", "skill:install", "skill:uninstall"},
+    "http://localhost:3000": set(_LOCAL_DEV_SCOPES),
+    "http://127.0.0.1:3000": set(_LOCAL_DEV_SCOPES),
+    "http://localhost:3004": set(_LOCAL_DEV_SCOPES),
+    "http://127.0.0.1:3004": set(_LOCAL_DEV_SCOPES),
 }
 
 
@@ -129,7 +135,7 @@ def _mint_scoped_bridge_token(origin: str) -> str:
     return _mint_scoped_bridge_token_for_scopes(origin, _scopes_for_origin(origin))
 
 
-def _mint_scoped_bridge_token_for_scopes(origin: str, scopes: set[str]) -> str:
+def _mint_scoped_bridge_token_for_scopes(origin: str, scopes: set[str], *, wallet_address: str = "") -> str:
     payload = {
         "v": 1,
         "origin": origin,
@@ -138,42 +144,73 @@ def _mint_scoped_bridge_token_for_scopes(origin: str, scopes: set[str]) -> str:
         "exp": int(time.time() + _SCOPED_TOKEN_TTL_SECONDS),
         "nonce": secrets.token_urlsafe(12),
     }
+    if wallet_address:
+        payload["walletAddress"] = wallet_address
     body = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     sig = hmac.new(_get_bridge_token().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
     return f"npbt1.{body}.{_b64url(sig)}"
 
 
-def _verify_scoped_bridge_token(token: str, *, origin: str, scope: str) -> bool:
-    if not token.startswith("npbt1."):
+def _verify_scoped_bridge_token(token: str, *, origin: str, scope: str, wallet_address: str = "") -> bool:
+    payload = _scoped_bridge_token_payload(token, origin=origin)
+    if not payload:
         return False
-    parts = token.split(".")
-    if len(parts) != 3:
-        return False
-    _prefix, body, sig = parts
-    expected = hmac.new(_get_bridge_token().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
-    try:
-        provided = _unb64url(sig)
-    except Exception:
-        return False
-    if not hmac.compare_digest(provided, expected):
-        return False
-    try:
-        payload = json.loads(_unb64url(body).decode("utf-8"))
-    except Exception:
-        return False
-    if not isinstance(payload, dict):
-        return False
-    if str(payload.get("origin") or "") != origin:
-        return False
-    try:
-        if int(payload.get("exp") or 0) < int(time.time()):
-            return False
-    except Exception:
+    if not _scoped_bridge_token_wallet_matches(payload, wallet_address=wallet_address):
         return False
     scopes = payload.get("scopes")
     if not isinstance(scopes, list):
         return False
     return scope in {str(item) for item in scopes}
+
+
+def _scoped_bridge_token_payload(token: str, *, origin: str) -> dict[str, Any] | None:
+    if not token.startswith("npbt1."):
+        return None
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    _prefix, body, sig = parts
+    expected = hmac.new(_get_bridge_token().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    try:
+        provided = _unb64url(sig)
+    except Exception:
+        return None
+    if not hmac.compare_digest(provided, expected):
+        return None
+    try:
+        payload = json.loads(_unb64url(body).decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("origin") or "") != origin:
+        return None
+    try:
+        if int(payload.get("exp") or 0) < int(time.time()):
+            return None
+    except Exception:
+        return None
+    return payload
+
+
+def _scoped_bridge_token_wallet_matches(payload: dict[str, Any], *, wallet_address: str = "") -> bool:
+    bound_wallet = str(payload.get("walletAddress") or "").strip()
+    provided_wallet = str(wallet_address or "").strip()
+    if not bound_wallet:
+        return True
+    return bool(provided_wallet) and hmac.compare_digest(bound_wallet, provided_wallet)
+
+
+def _request_bridge_token_payload(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
+    payload = _scoped_bridge_token_payload(
+        str(handler.headers.get(BRIDGE_TOKEN_HEADER, "") or ""),
+        origin=handler.headers.get("Origin", ""),
+    )
+    if not payload:
+        return None
+    if not _scoped_bridge_token_wallet_matches(payload, wallet_address=handler.headers.get(BRIDGE_WALLET_HEADER, "")):
+        return None
+    return payload
 
 
 def _audit_bridge_event(handler: BaseHTTPRequestHandler, action: str, status: str, details: dict[str, Any] | None = None) -> None:
@@ -209,7 +246,9 @@ def _rate_limit_exceeded(handler: BaseHTTPRequestHandler) -> bool:
     now = time.monotonic()
     window = 60.0
     limit = 30
-    if key[2].endswith("/wizard-chat/stream") or key[2].endswith("/wizard-chat"):
+    if key[2] == "/api/skills/marketplace/pairing/request":
+        limit = 20
+    elif key[2].endswith("/wizard-chat/stream") or key[2].endswith("/wizard-chat"):
         limit = 12
     with _RATE_LIMIT_LOCK:
         hits = [item for item in _RATE_LIMITS.get(key, []) if now - item < window]
@@ -325,14 +364,33 @@ def _origin_allowed(origin: str) -> bool:
     return not origin or origin in ALLOWED_ORIGINS
 
 
+_LOOPBACK_HOST_VALUES = {"localhost", "127.0.0.1", "::1"}
+
+
+def _host_header_allowed(host_header: str, bound_host: str) -> bool:
+    if not host_header:
+        return True
+    value = host_header.strip()
+    if value.startswith("["):
+        close = value.find("]")
+        host_only = value[1:close] if close >= 0 else value.strip("[]")
+    else:
+        host_only = value.rsplit(":", 1)[0] if ":" in value else value
+    host_only = host_only.lower()
+    bound = str(bound_host or DEFAULT_HOST).lower()
+    if bound in {"127.0.0.1", "localhost", "::1"}:
+        return host_only in _LOOPBACK_HOST_VALUES
+    return host_only == bound
+
+
 def _write_cors_headers(handler: BaseHTTPRequestHandler) -> None:
     origin = handler.headers.get("Origin", "")
     if origin in ALLOWED_ORIGINS:
         handler.send_header("Access-Control-Allow-Origin", origin)
         handler.send_header("Vary", "Origin")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-    handler.send_header("Access-Control-Allow-Headers", f"Content-Type, {BRIDGE_TOKEN_HEADER}")
-    handler.send_header("Access-Control-Expose-Headers", BRIDGE_TOKEN_HEADER)
+    handler.send_header("Access-Control-Allow-Headers", f"Content-Type, {BRIDGE_TOKEN_HEADER}, {BRIDGE_WALLET_HEADER}")
+    handler.send_header("Access-Control-Expose-Headers", f"{BRIDGE_TOKEN_HEADER}, {BRIDGE_WALLET_HEADER}")
 
 
 def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
@@ -432,19 +490,27 @@ def _pairing_public_payload(request: dict[str, Any], *, include_token: bool = Fa
 
 def create_pairing_request(body: dict[str, Any] | None = None, *, origin: str = "") -> dict[str, Any]:
     _prune_pending()
+    if not origin or origin not in ALLOWED_ORIGINS:
+        raise ValueError("Pairing requires an allowed browser origin.")
     body = body if isinstance(body, dict) else {}
+    wallet_address = str(body.get("walletAddress") or "").strip()
+    if not wallet_address:
+        raise ValueError("Pairing requires the currently connected marketplace wallet.")
     allowed_scopes = _scopes_for_origin(origin)
     requested = body.get("scopes")
     if isinstance(requested, list):
         scopes = {str(item).strip() for item in requested if str(item).strip()} & allowed_scopes
     else:
         scopes = set(allowed_scopes)
+    if not scopes:
+        raise ValueError("Pairing request has no allowed scopes for this origin.")
     request_id = secrets.token_hex(8)
     request = {
         "id": request_id,
         "origin": origin,
         "status": "pending",
         "scopes": sorted(scopes),
+        "walletAddress": wallet_address,
         "created_at": time.time(),
     }
     with _PENDING_LOCK:
@@ -473,6 +539,7 @@ def approve_pairing_request(request_id: str) -> dict[str, Any] | None:
         request["scopedBridgeToken"] = _mint_scoped_bridge_token_for_scopes(
             str(request.get("origin") or ""),
             {str(item) for item in request.get("scopes") or []},
+            wallet_address=str(request.get("walletAddress") or ""),
         )
         return _pairing_public_payload(request, include_token=True)
 
@@ -598,6 +665,20 @@ def _install_signature_challenge(payload: dict[str, Any]) -> str:
     return f"notpunks-install:v1:{digest}"
 
 
+def _consume_signature_challenge(wallet_address: str, challenge: str) -> tuple[bool, str]:
+    key_material = f"{_ton_address_key(wallet_address)}:{challenge}".encode("utf-8")
+    key = hashlib.sha256(key_material).hexdigest()
+    now = time.time()
+    with _USED_SIGNATURE_LOCK:
+        expired = [item for item, ts in _USED_SIGNATURE_CHALLENGES.items() if now - ts > _INSTALL_SIGNATURE_TTL_SECONDS]
+        for item in expired:
+            _USED_SIGNATURE_CHALLENGES.pop(item, None)
+        if key in _USED_SIGNATURE_CHALLENGES:
+            return False, "Wallet signature challenge was already used"
+        _USED_SIGNATURE_CHALLENGES[key] = now
+    return True, "ok"
+
+
 def _signed_payload_text(result: dict[str, Any]) -> str:
     payload = result.get("payload")
     if isinstance(payload, str):
@@ -638,7 +719,7 @@ def _same_optional_ton_address(left: str, right: str) -> bool:
     return _same_ton_address(left_raw, right_raw)
 
 
-def _validate_install_wallet_signature(body: dict[str, Any]) -> tuple[bool, str]:
+def _validate_install_wallet_signature(body: dict[str, Any], *, consume: bool = False) -> tuple[bool, str]:
     signature = body.get("walletSignature")
     if not isinstance(signature, dict):
         return False, "Wallet signature is required for marketplace install"
@@ -676,6 +757,8 @@ def _validate_install_wallet_signature(body: dict[str, Any]) -> tuple[bool, str]
             return False, "Wallet signature intent expired"
         if raw_text != _install_signature_challenge(intent):
             return False, "Wallet signature challenge mismatch"
+        if consume:
+            return _consume_signature_challenge(requested_wallet, raw_text)
         return True, "ok"
 
     try:
@@ -692,6 +775,8 @@ def _validate_install_wallet_signature(body: dict[str, Any]) -> tuple[bool, str]
         issued_at = 0.0
     if not issued_at or time.time() - issued_at > _INSTALL_SIGNATURE_TTL_SECONDS:
         return False, "Wallet signature payload expired"
+    if consume:
+        return _consume_signature_challenge(requested_wallet, raw_text)
     return True, "ok"
 
 
@@ -775,13 +860,25 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         _json_response(self, HTTPStatus.FORBIDDEN, {"ok": False, "error": "Origin not allowed"})
         return True
 
+    def _reject_bad_host(self) -> bool:
+        bound_host = str(getattr(self.server, "notpunks_bound_host", "") or DEFAULT_HOST)
+        if _host_header_allowed(self.headers.get("Host", ""), bound_host):
+            return False
+        _json_response(self, HTTPStatus.FORBIDDEN, {"ok": False, "error": "Host header not allowed"})
+        return True
+
     def _reject_bad_bridge_token(self) -> bool:
         parsed = urlparse(self.path)
         required_scope = _PATH_SCOPES.get((self.command, parsed.path))
         if parsed.path.startswith("/api/skills/marketplace/install-requests/"):
             required_scope = "skill:install"
         provided = self.headers.get(BRIDGE_TOKEN_HEADER, "")
-        if required_scope and _verify_scoped_bridge_token(str(provided or ""), origin=self.headers.get("Origin", ""), scope=required_scope):
+        if required_scope and _verify_scoped_bridge_token(
+            str(provided or ""),
+            origin=self.headers.get("Origin", ""),
+            scope=required_scope,
+            wallet_address=self.headers.get(BRIDGE_WALLET_HEADER, ""),
+        ):
             return False
         _audit_bridge_event(self, required_scope or "bridge", "unauthorized")
         _json_response(self, HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "Bridge pairing token is required"})
@@ -795,6 +892,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         return True
 
     def do_OPTIONS(self) -> None:
+        if self._reject_bad_host():
+            return
         if self._reject_bad_origin():
             return
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -802,6 +901,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        if self._reject_bad_host():
+            return
         if self._reject_bad_origin():
             return
         parsed = urlparse(self.path)
@@ -867,6 +968,25 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if parsed.path != "/api/skills/marketplace/status":
             _json_response(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "Not found"})
             return
+        token_payload = _request_bridge_token_payload(self)
+        token_scopes = token_payload.get("scopes") if token_payload else []
+        paired = isinstance(token_scopes, list) and "bridge:status" in {str(item) for item in token_scopes}
+        if not paired:
+            _json_response(self, HTTPStatus.OK, {
+                "ok": True,
+                "agentReachable": True,
+                "paired": False,
+                "skills": [],
+                "total": 0,
+                "publicUrl": str(getattr(self.server, "notpunks_public_url", "") or ""),
+                "tunnelEnabled": bool(getattr(self.server, "notpunks_tunnel_enabled", False)),
+                "tunnelError": str(getattr(self.server, "notpunks_tunnel_error", "") or ""),
+                "pairingRequired": True,
+                "bridgeTokenExpiresIn": _SCOPED_TOKEN_TTL_SECONDS,
+                "bridgeTokenScopes": sorted(_scopes_for_origin(self.headers.get("Origin", ""))),
+                "bridgeTokenHeader": BRIDGE_TOKEN_HEADER,
+            })
+            return
         from hermes_cli.skill_marketplace import list_installed_marketplace_skills
 
         query = parse_qs(parsed.query)
@@ -874,6 +994,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         skills = list_installed_marketplace_skills(name)
         _json_response(self, HTTPStatus.OK, {
             "ok": True,
+            "agentReachable": True,
+            "paired": True,
             "wallet": _local_wallet_summary(),
             "skills": skills,
             "total": len(skills),
@@ -887,6 +1009,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         })
 
     def do_POST(self) -> None:
+        if self._reject_bad_host():
+            return
         if self._reject_bad_origin():
             return
         if self._reject_rate_limited():
@@ -898,7 +1022,11 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             except Exception:
                 _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "Invalid JSON body"})
                 return
-            request = create_pairing_request(body, origin=self.headers.get("Origin", ""))
+            try:
+                request = create_pairing_request(body, origin=self.headers.get("Origin", ""))
+            except ValueError as exc:
+                _json_response(self, HTTPStatus.FORBIDDEN, {"ok": False, "error": str(exc)})
+                return
             _audit_bridge_event(self, "bridge:pair", "pending", {"requestId": request.get("id", "")})
             _json_response(self, HTTPStatus.ACCEPTED, {"ok": True, "request": request})
             return
@@ -954,6 +1082,8 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         _json_response(self, status, payload)
 
     def do_DELETE(self) -> None:
+        if self._reject_bad_host():
+            return
         if self._reject_bad_origin():
             return
         if self._reject_rate_limited():
@@ -1080,11 +1210,11 @@ class SkillWizardAgentTimeout(TimeoutError):
 
 
 def _skill_wizard_timeout_seconds() -> float:
-    raw = os.getenv("NOTPUNKS_SKILL_WIZARD_TIMEOUT", "180")
+    raw = os.getenv("NOTPUNKS_SKILL_WIZARD_TIMEOUT", "7200")
     try:
         return max(float(raw), 1.0)
     except ValueError:
-        return 180.0
+        return 7200.0
 
 
 def _run_skill_wizard_agent(prompt: str) -> str:
@@ -1204,7 +1334,7 @@ def _run_skill_wizard_agent_streaming(
     on_delta: Callable[[str], bool],
     on_reasoning: Callable[[str], bool] | None = None,
 ) -> str:
-    """Call the configured model and stream reasoning plus the JSON reply field."""
+    """Call the configured model and stream only the JSON reply field."""
     timeout = _skill_wizard_timeout_seconds()
     try:
         from agent.auxiliary_client import _read_main_model, _read_main_provider, resolve_provider_client
@@ -1289,7 +1419,7 @@ def _run_skill_wizard_agent_streaming(
         except Exception:
             reasoning_delta = ""
         if reasoning_delta and on_reasoning is not None:
-            if not on_reasoning(reasoning_delta):
+            if not on_reasoning("thinking"):
                 raise RuntimeError("Wizard stream was closed by the browser")
         delta = ""
         try:
@@ -1324,99 +1454,6 @@ def _wizard_last_user_message(body: dict[str, Any]) -> str:
     return ""
 
 
-def _wizard_fallback_questions(topic: str, *, ru: bool) -> list[str]:
-    lower = topic.lower()
-    capital_intent = any(marker in lower for marker in (
-        "capital",
-        "farm.notpunks",
-        "farm",
-        "yield",
-        "staking",
-        "ликвид",
-        "капитал",
-        "фарм",
-        "фарминг",
-        "стейк",
-        "доход",
-    ))
-    if ru and capital_intent:
-        return [
-            "1. Skill должен только анализировать позиции и доходность или также готовить действия для кошелька?",
-            "2. Какие данные ему можно читать: balances, staking/farm позиции, APY, rewards, историю транзакций, цены токенов?",
-            "3. Какие действия разрешены: только рекомендации, подготовка транзакций на подтверждение, ребалансировка, claim rewards, exit из позиции?",
-            "4. Какие риск-лимиты нужны: максимальная доля в одном пуле, минимальный остаток TON, запрет автоподписи, стоп-условия?",
-            "5. Какой результат считать успешным: dashboard капитала, план ребаланса, risk report, список транзакций на подтверждение?",
-        ]
-    if capital_intent:
-        return [
-            "1. Should the skill only analyze positions and yield, or also prepare wallet actions?",
-            "2. Which data may it read: balances, staking/farm positions, APY, rewards, transaction history, token prices?",
-            "3. Which actions are allowed: recommendations only, transaction drafts for approval, rebalancing, claiming rewards, exiting positions?",
-            "4. Which risk limits are required: max share per pool, minimum TON reserve, no auto-signing, stop conditions?",
-            "5. What counts as success: capital dashboard, rebalance plan, risk report, or transaction list for approval?",
-        ]
-    if ru:
-        return [
-            "1. Что skill должен делать сам, а что только рекомендовать пользователю?",
-            "2. Какие входные данные, сайты, API, файлы или tools ему разрешены?",
-            "3. Какие действия требуют явного подтверждения пользователя?",
-            "4. Какие ограничения риска, приватности и безопасности обязательны?",
-            "5. Какой результат считать успешным: отчет, чеклист, готовый draft, автоматизация или набор следующих действий?",
-        ]
-    return [
-        "1. What should the skill do autonomously, and what should it only recommend?",
-        "2. Which inputs, websites, APIs, files, or tools may it use?",
-        "3. Which actions require explicit user confirmation?",
-        "4. Which risk, privacy, and security boundaries are required?",
-        "5. What counts as success: report, checklist, draft, automation, or next-action plan?",
-    ]
-
-
-def _wizard_fallback_response(body: dict[str, Any], ctx: Any, reason: str) -> tuple[dict[str, Any], int]:
-    language = str(body.get("language") or "en").strip().lower()
-    action = str(body.get("action") or "chat").strip().lower()
-    topic = _wizard_last_user_message(body)
-    draft = _normalize_wizard_draft(body.get("draft"))
-    ru = language.startswith("ru")
-    topic_ru = topic or "этого Skill NFT"
-    topic_en = topic or "this Skill NFT"
-    questions = "\n".join(_wizard_fallback_questions(topic, ru=ru))
-
-    if ru and action == "generate":
-        reply = (
-            "Локальный агент не успел сформировать финальный SKILL.md. "
-            "Это запасной ответ bridge, не ответ модели. Добавьте недостающие детали по назначению skill, "
-            "разрешенным инструментам, ограничениям риска и критерию успешной проверки."
-        )
-    elif ru:
-        reply = (
-            "Локальный агент не ответил вовремя. Это запасной ответ bridge, не ответ модели.\n\n"
-            f"Для Skill NFT про «{topic_ru}» уточните:\n"
-            f"{questions}"
-        )
-    elif action == "generate":
-        reply = (
-            "The local agent did not finish generating the final SKILL.md in time. "
-            "This is a bridge fallback, not a model response. Add the skill purpose, allowed tools, risk boundaries, and success criteria."
-        )
-    else:
-        reply = (
-            "The local agent did not answer in time. This is a bridge fallback, not a model response.\n\n"
-            f"For the Skill NFT about \"{topic_en}\", please clarify:\n"
-            f"{questions}"
-        )
-    return {
-        "ok": True,
-        "reply": reply,
-        "done": False,
-        "draft": draft,
-        "missing": ["workflow", "tools", "boundaries", "verification"],
-        "agentFallback": True,
-        "warning": reason,
-        "walletAddress": getattr(ctx, "wallet_address", ""),
-    }, HTTPStatus.OK
-
-
 def _marketplace_skill_wizard_prompt(body: dict[str, Any]) -> str:
     language = str(body.get("language") or "en").strip().lower()
     action = str(body.get("action") or "chat").strip().lower()
@@ -1437,13 +1474,15 @@ def _marketplace_skill_wizard_prompt(body: dict[str, Any]) -> str:
     return "\n".join([
         "You are the NOTPUNKS Skill NFT creator wizard running inside the user's local NOTPUNKS Agent.",
         "Use the user's already configured local agent model/API key. Do not ask for API keys.",
+        "Do not expose chain-of-thought, hidden reasoning, thinking blocks, scratchpads, or analysis text.",
+        "Answer directly. Start the response immediately with a JSON object whose first key is reply.",
         "The wizard has two stages: chat and generate.",
         "In chat stage, do NOT produce the final skill instruction. Ask clarifying questions and update only high-level draft fields when obvious.",
         "In chat stage, ask as many useful clarifying questions as needed, grouped in a concise numbered list when several questions are needed.",
         "In generate stage, stop asking questions and synthesize the final skill instruction from all conversation context.",
         "Gather: skill name, category, what it does, target user, trigger conditions, inputs, external tools, boundaries, step-by-step workflow, expected result, failure handling, verification, price in TON, and NFT mint model.",
         "NFT mint model must be one_of_one, limited_edition, or open_edition. Ask whether the creator wants a single 1/1 Skill NFT, a limited collection with fixed supply, or an open collection.",
-        "Return ONLY valid JSON. No markdown.",
+        "Return ONLY valid JSON. No markdown outside JSON. No prose before or after JSON.",
         "JSON schema:",
         '{"reply":"string","done":false,"draft":{"name":"kebab-case","category":"marketplace","description":"string","instructions":"markdown","priceTon":0,"mintModel":"open_edition","mintSupplyMax":0,"collectionName":"string"},"missing":["field"]}',
         "For chat action: set done=false unless the user explicitly asks to generate now. Keep draft.instructions empty or unchanged.",
@@ -1476,7 +1515,11 @@ def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any]
     try:
         raw = _run_skill_wizard_agent(prompt)
     except SkillWizardAgentTimeout as exc:
-        return _wizard_fallback_response(body, ctx, str(exc))
+        return {
+            "ok": False,
+            "error": str(exc),
+            "walletAddress": getattr(ctx, "wallet_address", ""),
+        }, HTTPStatus.GATEWAY_TIMEOUT
     except Exception as exc:
         return {
             "ok": False,
@@ -1487,7 +1530,11 @@ def _marketplace_skill_wizard_chat(body: dict[str, Any]) -> tuple[dict[str, Any]
     draft = _normalize_wizard_draft(parsed.get("draft"))
     reply = str(parsed.get("reply") or raw or "").strip()
     if not reply:
-        return _wizard_fallback_response(body, ctx, "Local agent returned an empty wizard reply")
+        return {
+            "ok": False,
+            "error": "Local agent returned an empty wizard reply",
+            "walletAddress": getattr(ctx, "wallet_address", ""),
+        }, HTTPStatus.BAD_GATEWAY
     action = str(body.get("action") or "chat").strip().lower()
     if action == "generate" and not str(draft.get("instructions") or "").strip() and _looks_like_skill_instruction(reply):
         draft["instructions"] = reply
@@ -1536,18 +1583,16 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
             streamed_any_reply = True
             return _stream_json_event(handler, {"type": "delta", "delta": delta})
 
-        def _on_reasoning(delta: str) -> bool:
-            return _stream_json_event(handler, {"type": "reasoning", "delta": delta})
-
         raw = _run_skill_wizard_agent_streaming(
             prompt,
             on_status=lambda status: _stream_json_event(handler, {"type": "status", "status": status}),
             on_delta=_on_delta,
-            on_reasoning=_on_reasoning,
         )
     except SkillWizardAgentTimeout as exc:
-        payload, _status = _wizard_fallback_response(body, ctx, str(exc))
-        _stream_wizard_reply(handler, payload)
+        _stream_json_event(handler, {
+            "type": "error",
+            "error": str(exc),
+        })
         return
     except Exception:
         try:
@@ -1557,8 +1602,10 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
             )
             streamed_any_reply = False
         except SkillWizardAgentTimeout as exc:
-            payload, _status = _wizard_fallback_response(body, ctx, str(exc))
-            _stream_wizard_reply(handler, payload)
+            _stream_json_event(handler, {
+                "type": "error",
+                "error": str(exc),
+            })
             return
         except Exception as exc:
             _stream_json_event(handler, {
@@ -1571,8 +1618,10 @@ def _marketplace_skill_wizard_chat_stream(handler: BaseHTTPRequestHandler, body:
     draft = _normalize_wizard_draft(parsed.get("draft"))
     reply = str(parsed.get("reply") or raw or "").strip()
     if not reply:
-        payload, _status = _wizard_fallback_response(body, ctx, "Local agent returned an empty wizard reply")
-        _stream_wizard_reply(handler, payload)
+        _stream_json_event(handler, {
+            "type": "error",
+            "error": "Local agent returned an empty wizard reply",
+        })
         return
     action = str(body.get("action") or "chat").strip().lower()
     if action == "generate" and not str(draft.get("instructions") or "").strip() and _looks_like_skill_instruction(reply):
@@ -1931,7 +1980,7 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
     expected_bundle_hash = str(body.get("expectedBundleHash") or "").strip()
     mode = str(body.get("mode") or "install").strip()
     require_wallet_signature = bool(body.get("requireWalletSignature"))
-    if require_wallet_signature:
+    if require_wallet_signature and not request_id:
         ok, reason = _validate_install_wallet_signature(body)
         if not ok:
             return {"ok": False, "error": reason}, HTTPStatus.BAD_REQUEST
@@ -1984,6 +2033,10 @@ def _install_marketplace_skill(body: dict[str, Any], *, origin: str = "") -> tup
     if not approved_payload_matches:
         _notify_install_result(request_id, skill_name, ok=False, message="Install request does not match approved payload")
         return {"ok": False, "error": "Install request does not match approved payload"}, HTTPStatus.BAD_REQUEST
+    if require_wallet_signature:
+        ok, reason = _validate_install_wallet_signature(body, consume=True)
+        if not ok:
+            return {"ok": False, "error": reason}, HTTPStatus.BAD_REQUEST
 
     ctx = build_wallet_context()
     if not ctx and require_wallet_signature and requested_wallet:
@@ -2140,12 +2193,12 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
         "expectedBundleHash": str(body.get("expectedBundleHash") or ""),
     }
     require_wallet_signature = bool(body.get("requireWalletSignature"))
-    if require_wallet_signature:
+    request_id = str(body.get("requestId") or "").strip()
+    if require_wallet_signature and not request_id:
         ok, reason = _validate_install_wallet_signature(body)
         if not ok:
             return {"ok": False, "error": reason}, HTTPStatus.BAD_REQUEST
 
-    request_id = str(body.get("requestId") or "").strip()
     requested_wallet = str(body.get("walletAddress") or "").strip()
     metadata_url = str(body.get("metadataUrl") or "").strip()
     expected_bundle_hash = str(body.get("expectedBundleHash") or "").strip()
@@ -2196,6 +2249,10 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
     if not approved_payload_matches:
         _notify_install_result(request_id, skill_name, ok=False, message="Uninstall request does not match approved payload")
         return {"ok": False, "error": "Uninstall request does not match approved payload"}, HTTPStatus.BAD_REQUEST
+    if require_wallet_signature:
+        ok, reason = _validate_install_wallet_signature(body, consume=True)
+        if not ok:
+            return {"ok": False, "error": reason}, HTTPStatus.BAD_REQUEST
 
     if require_wallet_signature and requested_wallet:
         try:
@@ -2300,6 +2357,7 @@ def start_local_bridge(
         return None
 
     server = ThreadingHTTPServer((host, port), _BridgeHandler)
+    setattr(server, "notpunks_bound_host", host)
     setattr(server, "notpunks_public_url", "")
     setattr(server, "notpunks_tunnel_enabled", bool(bridge.get("secure_tunnel")))
     setattr(server, "notpunks_tunnel_error", "")
