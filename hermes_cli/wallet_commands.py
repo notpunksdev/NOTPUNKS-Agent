@@ -20,7 +20,7 @@ from agent.wallet.connector import (
     generate_qr_terminal,
     run_async,
 )
-from agent.wallet.context import build_wallet_context
+from agent.wallet.context import build_wallet_context, check_wallet_on_startup
 from agent.wallet.models import WalletConnection
 from agent.wallet.nft_scanner import NFTScanner
 from agent.wallet.skill_mapper import SkillMapper
@@ -608,9 +608,14 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
                 if data:
                     wallet = _save_wallet_from_callback(data, network)
                     if wallet:
-                        build_wallet_context()
                         console.print(f"\n✓ Wallet connected: {wallet.address}", markup=False, highlight=False)
-                        console.print("Run /wallet status to view NFT unlocks.", markup=False, highlight=False)
+                        check_wallet_on_startup(
+                            console=console,
+                            prompt_connect=False,
+                            require_not_punks=True,
+                            force_refresh=True,
+                        )
+                        console.print("Run /wallet status to view all NFT unlocks.", markup=False, highlight=False)
                     else:
                         console.print("\n[yellow]Wallet callback arrived without an address.[/yellow]")
                 else:
