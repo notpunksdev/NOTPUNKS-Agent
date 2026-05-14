@@ -6578,7 +6578,13 @@ class HermesCLI:
         except SystemExit:
             pass
 
-    def _refresh_wallet_access_gate(self, prompt_connect: bool = False, force_refresh: bool = False, quiet: bool = False) -> bool:
+    def _refresh_wallet_access_gate(
+        self,
+        prompt_connect: bool = False,
+        force_refresh: bool = False,
+        quiet: bool = False,
+        reset_on_start: bool = False,
+    ) -> bool:
         """Refresh the temporary NOT Punks holder gate for the interactive CLI."""
         try:
             wallet_cfg = self.config.get("wallet", {}) if isinstance(self.config.get("wallet", {}), dict) else {}
@@ -6593,7 +6599,7 @@ class HermesCLI:
                 self._output_console(),
                 prompt_connect=prompt_connect,
                 require_not_punks=True,
-                reset_on_start=False,
+                reset_on_start=reset_on_start,
                 force_refresh=force_refresh,
                 quiet=quiet,
             )
@@ -10053,7 +10059,7 @@ class HermesCLI:
         wallet_cfg = self.config.get("wallet", {}) if isinstance(self.config.get("wallet", {}), dict) else {}
         self._wallet_access_locked = True
         prompt_wallet_connect = wallet_cfg.get("prompt_connect_on_start", True)
-        self._refresh_wallet_access_gate(prompt_connect=prompt_wallet_connect)
+        self._refresh_wallet_access_gate(prompt_connect=prompt_wallet_connect, reset_on_start=True)
         if prompt_wallet_connect and self._wallet_access_locked:
             self._watch_wallet_connect_gate_refresh()
 
