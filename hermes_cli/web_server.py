@@ -2161,9 +2161,9 @@ async def get_skills():
 
 @app.get("/api/skills/marketplace/status")
 async def get_marketplace_skill_status(name: str = ""):
-    from hermes_cli.skill_marketplace import list_installed_marketplace_skills
+    from hermes_cli.skill_marketplace import list_installed_agent_skills
 
-    skills = list_installed_marketplace_skills(name)
+    skills = list_installed_agent_skills(name)
     return {
         "ok": True,
         "skills": skills,

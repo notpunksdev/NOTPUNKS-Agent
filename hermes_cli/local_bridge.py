@@ -994,11 +994,11 @@ class _BridgeHandler(BaseHTTPRequestHandler):
                 "bridgeTokenHeader": BRIDGE_TOKEN_HEADER,
             })
             return
-        from hermes_cli.skill_marketplace import list_installed_marketplace_skills
+        from hermes_cli.skill_marketplace import list_installed_agent_skills
 
         query = parse_qs(parsed.query)
         name = (query.get("name") or [""])[0]
-        skills = list_installed_marketplace_skills(name)
+        skills = list_installed_agent_skills(name)
         _json_response(self, HTTPStatus.OK, {
             "ok": True,
             "agentReachable": True,
@@ -2184,10 +2184,12 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
     from hermes_cli.skill_marketplace import (
         fetch_marketplace_wallet_license,
         fetch_remote_listing,
+        list_installed_agent_skills,
         list_installed_marketplace_skills,
         normalize_marketplace_listing,
         uninstall_marketplace_skill,
     )
+    from tools.skill_manager_tool import _delete_skill
 
     skill_name = str(body.get("name") or "").strip()
     if not skill_name:
@@ -2262,6 +2264,7 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
         if not ok:
             return {"ok": False, "error": reason}, HTTPStatus.BAD_REQUEST
 
+    marketplace_rows = list_installed_marketplace_skills(skill_name)
     if require_wallet_signature and requested_wallet:
         try:
             listing = normalize_marketplace_listing(fetch_remote_listing(skill_name))
@@ -2274,12 +2277,26 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
                     _notify_install_result(request_id, skill_name, ok=False, message=message)
                     return {"ok": False, "error": message}, HTTPStatus.FORBIDDEN
         except Exception as exc:
-            message = f"Marketplace license check failed: {exc}"
-            _notify_install_result(request_id, skill_name, ok=False, message=message)
-            return {"ok": False, "error": message}, HTTPStatus.BAD_GATEWAY
+            if not marketplace_rows:
+                pass
+            else:
+                message = f"Marketplace license check failed: {exc}"
+                _notify_install_result(request_id, skill_name, ok=False, message=message)
+                return {"ok": False, "error": message}, HTTPStatus.BAD_GATEWAY
 
     try:
-        result = uninstall_marketplace_skill(skill_name)
+        try:
+            result = uninstall_marketplace_skill(skill_name)
+        except FileNotFoundError:
+            deleted = _delete_skill(skill_name)
+            if not deleted.get("success"):
+                raise FileNotFoundError(str(deleted.get("error") or f"Local skill is not installed: {skill_name}"))
+            result = {
+                "name": skill_name,
+                "skillId": skill_name,
+                "path": "",
+                "message": str(deleted.get("message") or f"Deleted {skill_name}"),
+            }
     except FileNotFoundError as exc:
         with _PENDING_LOCK:
             _load_pending_unlocked()
@@ -2303,7 +2320,7 @@ def _uninstall_marketplace_skill(body: dict[str, Any]) -> tuple[dict[str, Any], 
         _notify_install_result(request_id, skill_name, ok=False, message=str(exc))
         return {"ok": False, "error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR
 
-    status_rows = list_installed_marketplace_skills(str(result.get("skillId") or skill_name))
+    status_rows = list_installed_agent_skills(str(result.get("skillId") or skill_name))
     response_payload = {
         "ok": True,
         "mode": "uninstall",

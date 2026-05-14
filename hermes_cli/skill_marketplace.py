@@ -2607,6 +2607,82 @@ def list_installed_marketplace_skills(name: str = "") -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: row["skillId"])
 
 
+def list_installed_agent_skills(name: str = "") -> list[dict[str, Any]]:
+    """Return all local skills visible to the agent, including marketplace skills."""
+    from tools.skill_manager_tool import _find_skill
+    from tools.skills_hub import HubLockFile, SKILLS_DIR
+    from tools.skills_tool import _find_all_skills
+
+    wanted = _slug(name) if name else ""
+    marketplace_rows = list_installed_marketplace_skills(name)
+    rows_by_name: dict[str, dict[str, Any]] = {}
+    for row in marketplace_rows:
+        key = _slug(str(row.get("name") or row.get("skillId") or ""))
+        rows_by_name[key] = {
+            **row,
+            "marketplace": True,
+            "manageable": True,
+        }
+
+    lock_entries = HubLockFile().list_installed()
+    lock_by_name = {_slug(str(entry.get("name") or "")): entry for entry in lock_entries}
+    lock_by_path = {
+        str(entry.get("install_path") or ""): entry
+        for entry in lock_entries
+        if str(entry.get("install_path") or "")
+    }
+
+    for skill in _find_all_skills(skip_disabled=True):
+        raw_name = str(skill.get("name") or "").strip()
+        if not raw_name:
+            continue
+        skill_key = _slug(raw_name)
+        if wanted and wanted != skill_key:
+            continue
+        if skill_key in rows_by_name:
+            continue
+
+        found = _find_skill(raw_name)
+        skill_path = found.get("path") if isinstance(found, dict) else None
+        install_path = ""
+        absolute_path = ""
+        manageable = False
+        if skill_path:
+            try:
+                absolute_path = str(skill_path)
+                install_path = str(skill_path.relative_to(SKILLS_DIR))
+                manageable = True
+            except ValueError:
+                install_path = str(skill_path)
+                manageable = False
+
+        entry = lock_by_name.get(skill_key) or lock_by_path.get(install_path) or {}
+        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+        source = str(entry.get("source") or "local")
+        rows_by_name[skill_key] = {
+            "skillId": skill_key,
+            "name": raw_name,
+            "status": "installed",
+            "path": install_path,
+            "absolutePath": absolute_path,
+            "bundleHash": str(metadata.get("bundle_hash") or entry.get("content_hash") or ""),
+            "listingBundleHash": str(metadata.get("listing_bundle_hash") or ""),
+            "currentBundleHash": str(entry.get("content_hash") or ""),
+            "scanVerdict": str(entry.get("scan_verdict") or ""),
+            "source": source,
+            "sourceKind": str(metadata.get("source_kind") or ""),
+            "identifier": str(entry.get("identifier") or ""),
+            "installedAt": str(entry.get("installed_at") or ""),
+            "updatedAt": str(entry.get("updated_at") or ""),
+            "category": str(skill.get("category") or ""),
+            "description": str(skill.get("description") or ""),
+            "marketplace": False,
+            "manageable": manageable,
+        }
+
+    return sorted(rows_by_name.values(), key=lambda row: (not bool(row.get("marketplace")), str(row.get("skillId") or "")))
+
+
 def uninstall_marketplace_skill(name: str) -> dict[str, Any]:
     """Remove a locally installed marketplace skill without touching builtins or local author skills."""
     from tools.skills_hub import uninstall_skill
