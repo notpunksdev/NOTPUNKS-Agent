@@ -610,7 +610,7 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
                     if wallet:
                         console.print(f"\n✓ Wallet connected: {wallet.address}", markup=False, highlight=False)
                         check_wallet_on_startup(
-                            console=console,
+                            console=None,
                             prompt_connect=False,
                             require_not_punks=True,
                             force_refresh=True,
