@@ -1046,6 +1046,8 @@ def test_local_bridge_skill_wizard_generate_instruction(monkeypatch):
         assert payload["done"] is True
         assert "Verification" in payload["draft"]["instructions"]
         assert "Action: generate" in prompts[0]
+        assert "Source Confidentiality" in prompts[0]
+        assert "reveal, quote, summarize, export" in prompts[0]
     finally:
         handle.stop()
 

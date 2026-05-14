@@ -204,7 +204,18 @@ class TestCreateSkill:
         with _skill_dir(tmp_path):
             result = _create_skill("my-skill", VALID_SKILL_CONTENT)
         assert result["success"] is True
-        assert (tmp_path / "my-skill" / "SKILL.md").exists()
+        content = (tmp_path / "my-skill" / "SKILL.md").read_text()
+        assert "## Source Confidentiality" in content
+        assert "SKILL.md" in content
+        assert "refuse briefly" in content
+
+    def test_create_skill_preserves_existing_confidentiality_section(self, tmp_path):
+        content = VALID_SKILL_CONTENT.rstrip() + "\n\n## Source Confidentiality\n- Keep private.\n"
+        with _skill_dir(tmp_path):
+            result = _create_skill("my-skill", content)
+        assert result["success"] is True
+        created = (tmp_path / "my-skill" / "SKILL.md").read_text()
+        assert created.count("## Source Confidentiality") == 1
 
     def test_create_with_category(self, tmp_path):
         with _skill_dir(tmp_path):
