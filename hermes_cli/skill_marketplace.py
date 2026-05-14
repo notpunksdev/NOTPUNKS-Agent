@@ -902,10 +902,23 @@ def _is_http_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+def _require_safe_public_url(url: str, label: str = "URL") -> str:
+    if not _is_http_url(url):
+        raise ValueError(f"{label} must be an http(s) URL")
+    try:
+        from tools.url_safety import is_safe_url
+    except Exception as exc:
+        raise ValueError(f"{label} safety checker is unavailable") from exc
+    if not is_safe_url(url):
+        raise ValueError(f"{label} targets a private, internal, or otherwise unsafe address")
+    return url
+
+
 def _fetch_skill_metadata(listing: dict[str, Any], base_url: str, skill_id: str) -> dict[str, Any]:
     import httpx
 
     metadata_url = _metadata_url_from_listing(listing, base_url, skill_id)
+    _require_safe_public_url(metadata_url, "sNFT metadata URL")
     response = httpx.get(metadata_url, timeout=30)
     try:
         response.raise_for_status()
@@ -993,6 +1006,7 @@ def _snft_unlock_endpoint(snft: dict[str, Any], metadata_url: str = "") -> str:
         if registry_url:
             import httpx
 
+            _require_safe_public_url(registry_url, "sNFT unlock registry URL")
             response = httpx.get(registry_url, timeout=30)
             response.raise_for_status()
             payload = response.json()
@@ -1014,6 +1028,8 @@ def _snft_unlock_endpoint(snft: dict[str, Any], metadata_url: str = "") -> str:
                             break
     if endpoint and metadata_url:
         endpoint = urljoin(metadata_url, endpoint)
+    if endpoint:
+        _require_safe_public_url(endpoint, "sNFT unlock endpoint")
     return endpoint
 
 
@@ -2233,6 +2249,7 @@ def _install_snft_marketplace_skill(
             else urljoin(_marketplace_api_base(base_url) + "/", f"{skill_id}/cartridge")
         )
 
+    _require_safe_public_url(cartridge_url, "sNFT cartridge URL")
     cartridge_response = httpx.get(cartridge_url, timeout=60)
     cartridge_response.raise_for_status()
     encrypted_payload = cartridge_response.content
@@ -2292,6 +2309,7 @@ def _install_snft_marketplace_skill(
         if metadata_url
         else urljoin(_marketplace_api_base(base_url) + "/", f"{skill_id}/unlock")
     )
+    _require_safe_public_url(unlock_url, "sNFT unlock URL")
     payload: dict[str, Any] = {"skillId": skill_id}
     if wallet_proof:
         payload["walletProof"] = wallet_proof
@@ -2382,6 +2400,7 @@ def install_marketplace_skill(
     except Exception:
         raise
 
+    _require_safe_public_url(bundle_url, "Marketplace bundle URL")
     bundle_response = httpx.get(bundle_url, timeout=60)
     bundle_response.raise_for_status()
 
@@ -2416,6 +2435,7 @@ def install_snft_from_metadata_url(
 
     if not _is_http_url(metadata_url):
         raise ValueError("sNFT metadata URL must be an http(s) URL")
+    _require_safe_public_url(metadata_url, "sNFT metadata URL")
     response = httpx.get(metadata_url, timeout=30)
     response.raise_for_status()
     metadata = response.json()

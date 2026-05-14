@@ -42,6 +42,12 @@ from hermes_cli.skills_hub import (
 )
 from io import StringIO
 from rich.console import Console
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _allow_example_urls(monkeypatch):
+    monkeypatch.setattr("tools.url_safety.is_safe_url", lambda _url: True)
 
 
 def test_snft_locked_secret_zeroize():
@@ -761,6 +767,31 @@ def test_install_snft_from_metadata_url_installs_without_marketplace_listing(tmp
     assert (skills_dir / "alpha" / "SKILL.md").exists()
     assert "# Alpha" not in (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8")
     assert (skills_dir / "alpha" / ".notpunks-snft" / "cartridge.enc").exists()
+
+
+def test_install_snft_blocks_private_metadata_url(monkeypatch):
+    monkeypatch.setattr("tools.url_safety.is_safe_url", lambda _url: False)
+
+    try:
+        install_snft_from_metadata_url("http://127.0.0.1:8080/snft/metadata.json")
+    except ValueError as exc:
+        assert "unsafe address" in str(exc)
+    else:
+        raise AssertionError("private metadata URL was not blocked")
+
+
+def test_snft_unlock_endpoint_blocks_private_url(monkeypatch):
+    monkeypatch.setattr("tools.url_safety.is_safe_url", lambda url: not url.startswith("http://127.0.0.1"))
+
+    try:
+        _snft_unlock_endpoint(
+            {"unlock": {"endpoint": "http://127.0.0.1:9119/api/secret"}},
+            "https://issuer.example/snft/alpha/metadata.json",
+        )
+    except ValueError as exc:
+        assert "unsafe address" in str(exc)
+    else:
+        raise AssertionError("private unlock endpoint was not blocked")
 
 
 def test_install_snft_posts_normalized_ton_unlock_request(tmp_path, monkeypatch):
