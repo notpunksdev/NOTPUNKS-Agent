@@ -17,6 +17,7 @@ import tempfile
 import time
 import base64
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -2109,6 +2110,68 @@ def load_encrypted_snft_skill_file(skill_dir: Path, file_path: str = "") -> dict
         unlock_secret(decrypted_secret)
 
 
+def _extract_protected_skill_source(envelope: str) -> str:
+    start = envelope.find("<protected_skill_source>")
+    end = envelope.find("</protected_skill_source>")
+    if start == -1 or end == -1 or end <= start:
+        return ""
+    start += len("<protected_skill_source>")
+    return envelope[start:end].strip()
+
+
+def _normalized_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip().lower()
+
+
+def _protected_output_leakage_reason(output: str, protected_envelope: str) -> str | None:
+    """Detect likely protected sNFT source leakage before returning model output."""
+    if not output.strip():
+        return None
+
+    lowered = output.lower()
+    blocked_markers = (
+        "<protected_skill_source",
+        "</protected_skill_source>",
+        "protected_skill_source",
+        "runtime metadata:",
+        "encrypted_sha256:",
+        "decrypt key",
+        "decryption key",
+        "capsule contents",
+        "raw skill instructions",
+    )
+    for marker in blocked_markers:
+        if marker in lowered:
+            return f"protected runtime marker leaked: {marker}"
+
+    raw_source = _extract_protected_skill_source(protected_envelope)
+    source_candidates: list[str] = []
+    if raw_source:
+        source_candidates.append(raw_source)
+        source_candidates.extend(
+            line.strip()
+            for line in raw_source.splitlines()
+            if len(line.strip()) >= 6 and not line.strip().startswith("---")
+        )
+
+    normalized_output = _normalized_text(output)
+    for candidate in source_candidates:
+        normalized_candidate = _normalized_text(candidate)
+        if len(normalized_candidate) >= 24 and normalized_candidate in normalized_output:
+            return "protected source text leaked"
+        if 6 <= len(normalized_candidate) < 24 and candidate.strip() in output:
+            return "protected source line leaked"
+
+    words = re.findall(r"[A-Za-z0-9_#:-]{4,}", _normalized_text(raw_source))
+    if len(words) >= 12:
+        for index in range(0, len(words) - 11):
+            phrase = " ".join(words[index:index + 12])
+            if phrase in normalized_output:
+                return "protected source fragment leaked"
+
+    return None
+
+
 def run_encrypted_snft_skill(
     skill_dir: Path,
     *,
@@ -2162,9 +2225,26 @@ def run_encrypted_snft_skill(
         timeout=120,
     )
     content = response.choices[0].message.content
+    result = str(content or "").strip()
+    leakage_reason = _protected_output_leakage_reason(result, protected_source)
+    if leakage_reason:
+        return {
+            "ok": False,
+            "error": (
+                "Protected sNFT runtime output was blocked because it appears to expose protected skill source. "
+                "Ask the skill to run on the task without revealing implementation details."
+            ),
+            "leakage_blocked": True,
+            "leakage_reason": leakage_reason,
+            "source_kind": "snft_encrypted_runtime",
+            "protected_runtime": True,
+            "runtime_mode": unlocked.get("runtime_mode") or "local_protected",
+            "source_export": False,
+            "memory_hardening": unlocked.get("memory_hardening") if isinstance(unlocked.get("memory_hardening"), dict) else {},
+        }
     return {
         "ok": True,
-        "result": str(content or "").strip(),
+        "result": result,
         "source_kind": "snft_encrypted_runtime",
         "protected_runtime": True,
         "runtime_mode": unlocked.get("runtime_mode") or "local_protected",

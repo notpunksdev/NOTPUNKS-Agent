@@ -1529,14 +1529,14 @@ def skill_run_protected(
             user_files=user_files,
         )
         if not result.get("ok"):
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": result.get("error") or "Protected sNFT skill runtime failed",
-                    "runtime_mode": result.get("runtime_mode") or "local_protected",
-                },
-                ensure_ascii=False,
-            )
+            payload = {
+                "success": False,
+                "error": result.get("error") or "Protected sNFT skill runtime failed",
+                "runtime_mode": result.get("runtime_mode") or "local_protected",
+            }
+            if result.get("leakage_blocked"):
+                payload["leakage_blocked"] = True
+            return json.dumps(payload, ensure_ascii=False)
         return json.dumps(
             {
                 "success": True,
