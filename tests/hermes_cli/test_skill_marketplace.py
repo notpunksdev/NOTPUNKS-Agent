@@ -642,6 +642,15 @@ def test_install_marketplace_skill_prefers_encrypted_snft_cartridge(tmp_path, mo
     direct_source = json.loads(skill_view("alpha", file_path="SKILL.md", preprocess=False))
     assert direct_source["success"] is False
     assert "source export is disabled" in direct_source["error"]
+    assert direct_source["protected_runtime"] is True
+    assert "# Alpha" not in json.dumps(direct_source)
+
+    monkeypatch.setenv("NOTPUNKS_SNFT_ALLOW_SOURCE_EXPORT", "1")
+    direct_source_with_override = json.loads(skill_view("alpha", file_path="SKILL.md", preprocess=False))
+    assert direct_source_with_override["success"] is False
+    assert "source export is disabled" in direct_source_with_override["error"]
+    assert "# Alpha" not in json.dumps(direct_source_with_override)
+    monkeypatch.delenv("NOTPUNKS_SNFT_ALLOW_SOURCE_EXPORT", raising=False)
 
     unlocked = load_encrypted_snft_skill_file(skills_dir / "alpha", "")
     assert unlocked["ok"] is True
