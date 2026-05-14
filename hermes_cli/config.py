@@ -1123,7 +1123,7 @@ DEFAULT_CONFIG = {
         "tonapi_key": "",
         "auto_scan_on_start": True,
         "prompt_connect_on_start": True,
-        "reset_on_start": True,
+        "reset_on_start": False,
         "access_recheck_interval_seconds": 300,
     },
     "nft": {
