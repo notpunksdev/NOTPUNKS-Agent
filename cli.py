@@ -6593,7 +6593,7 @@ class HermesCLI:
                 self._output_console(),
                 prompt_connect=prompt_connect,
                 require_not_punks=True,
-                reset_on_start=bool(prompt_connect and wallet_cfg.get("reset_on_start", False)),
+                reset_on_start=False,
                 force_refresh=force_refresh,
                 quiet=quiet,
             )
