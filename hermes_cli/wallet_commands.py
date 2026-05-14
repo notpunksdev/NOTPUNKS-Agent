@@ -11,7 +11,7 @@ from pathlib import Path
 
 from rich.console import Console
 from hermes_constants import get_hermes_home
-from hermes_cli.config import load_config
+from hermes_cli.config import load_config, save_config
 from hermes_cli.skin_engine import get_active_skin
 
 from agent.wallet.connector import (
@@ -452,7 +452,7 @@ def _save_wallet_from_callback(data: dict, network: str) -> WalletConnection | N
     config["wallet"]["public_key"] = wallet.public_key
     config["wallet"]["device_info"] = wallet.device_info
     config["wallet"]["connected_at"] = wallet.connected_at
-    from hermes_cli.config import save_config
+    config["wallet"].pop("pending_hosted_session", None)
 
     save_config(config)
     return wallet
@@ -471,23 +471,77 @@ def _hosted_wallet_session_url(session_id: str, payload: str) -> str:
 HOSTED_WALLET_SESSION_TIMEOUT = 2 * 60 * 60
 
 
-def _poll_hosted_wallet_session(session_id: str, timeout: float = HOSTED_WALLET_SESSION_TIMEOUT) -> dict | None:
+def _record_pending_hosted_wallet_session(session_id: str, payload: str, web_url: str) -> None:
+    config = load_config()
+    config.setdefault("wallet", {})
+    config["wallet"]["pending_hosted_session"] = {
+        "session_id": session_id,
+        "payload": payload,
+        "url": web_url,
+        "created_at": time.time(),
+    }
+    save_config(config)
+
+
+def _clear_pending_hosted_wallet_session(session_id: str = "") -> None:
+    config = load_config()
+    wallet_cfg = config.setdefault("wallet", {})
+    pending = wallet_cfg.get("pending_hosted_session")
+    if not isinstance(pending, dict):
+        return
+    if session_id and str(pending.get("session_id") or "") != session_id:
+        return
+    wallet_cfg.pop("pending_hosted_session", None)
+    save_config(config)
+
+
+def _fetch_hosted_wallet_session(session_id: str) -> dict | None:
     import urllib.error
     import urllib.request
 
-    deadline = time.time() + timeout
     url = f"https://agent.notpunks.com/api/wallet-connect/sessions/{session_id}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        if isinstance(data, dict) and data.get("status") == "connected":
+            wallet = data.get("wallet")
+            return wallet if isinstance(wallet, dict) else None
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def _poll_hosted_wallet_session(session_id: str, timeout: float = HOSTED_WALLET_SESSION_TIMEOUT) -> dict | None:
+    deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=10) as response:
-                data = json.loads(response.read().decode("utf-8"))
-            if isinstance(data, dict) and data.get("status") == "connected":
-                wallet = data.get("wallet")
-                return wallet if isinstance(wallet, dict) else None
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            pass
+        wallet = _fetch_hosted_wallet_session(session_id)
+        if wallet:
+            return wallet
         time.sleep(2)
     return None
+
+
+def _consume_pending_hosted_wallet_session(console, network: str) -> WalletConnection | None:
+    config = load_config()
+    wallet_cfg = config.get("wallet", {}) if isinstance(config.get("wallet"), dict) else {}
+    pending = wallet_cfg.get("pending_hosted_session")
+    if not isinstance(pending, dict):
+        return None
+    session_id = str(pending.get("session_id") or "").strip()
+    created_at = float(pending.get("created_at") or 0.0)
+    if not session_id:
+        return None
+    if created_at and time.time() - created_at > HOSTED_WALLET_SESSION_TIMEOUT:
+        _clear_pending_hosted_wallet_session(session_id)
+        return None
+    data = _fetch_hosted_wallet_session(session_id)
+    if not data:
+        return None
+    wallet = _save_wallet_from_callback(data, network)
+    if wallet:
+        console.print(f"\n✓ Wallet connected: {wallet.address}", markup=False, highlight=False)
+        console.print("Run /wallet status to view NFT unlocks.", markup=False, highlight=False)
+    return wallet
 
 
 def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False) -> int:
@@ -524,6 +578,7 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
     session_id = _uuid.uuid4().hex
 
     web_url = _hosted_wallet_session_url(session_id, payload)
+    _record_pending_hosted_wallet_session(session_id, payload, web_url)
 
     # Show link
     console.print(f"[dim]Open this link in your browser:[/dim]")
@@ -559,6 +614,7 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
                     else:
                         console.print("\n[yellow]Wallet callback arrived without an address.[/yellow]")
                 else:
+                    _clear_pending_hosted_wallet_session(session_id)
                     console.print("\n[yellow]Wallet connection timed out. Run /wallet connect to try again.[/yellow]")
             except Exception as e:
                 console.print(f"\n[red]Wallet connection failed: {e}[/red]")
@@ -571,6 +627,7 @@ def _wallet_connect_web(console=None, blocking: bool = True, force: bool = False
     data = _poll_hosted_wallet_session(session_id)
 
     if data is None:
+        _clear_pending_hosted_wallet_session(session_id)
         console.print("[red]Connection timed out.[/red]")
         return 1
 
@@ -605,12 +662,20 @@ def _wallet_status(console=None) -> int:
     config = load_config()
     wallet_cfg = config.get("wallet", {})
     address = wallet_cfg.get("address")
+    network = wallet_cfg.get("network", "mainnet")
+
+    if not address:
+        pending_wallet = _consume_pending_hosted_wallet_session(console, network)
+        if pending_wallet:
+            config = load_config()
+            wallet_cfg = config.get("wallet", {})
+            address = wallet_cfg.get("address")
 
     # Try to restore connection from pytonconnect storage if no address in config
     if not address:
         try:
             from agent.wallet.connector import WalletConnector
-            connector = WalletConnector(network=wallet_cfg.get("network", "mainnet"))
+            connector = WalletConnector(network=network)
             restored = run_async(connector._ton_connect.restore_connection())
             if restored:
                 wallet = connector.get_connected_wallet()

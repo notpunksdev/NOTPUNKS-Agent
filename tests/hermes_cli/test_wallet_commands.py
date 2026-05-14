@@ -52,6 +52,44 @@ def test_wallet_connect_web_uses_agent_hosted_page(monkeypatch):
     assert "callback_url=" not in opened[0]
 
 
+def test_wallet_status_consumes_pending_hosted_session(monkeypatch):
+    saved = {}
+    messages = []
+    config = {
+        "wallet": {
+            "address": None,
+            "network": "mainnet",
+            "pending_hosted_session": {
+                "session_id": "a" * 32,
+                "payload": "notpunks-test",
+                "url": "https://agent.notpunks.com/wallet-connect",
+                "created_at": wallet_commands.time.time(),
+            },
+        }
+    }
+
+    class Console:
+        def print(self, *args, **kwargs):
+            messages.append(" ".join(str(arg) for arg in args))
+
+    monkeypatch.setattr(wallet_commands, "load_config", lambda: config)
+    monkeypatch.setattr(wallet_commands, "save_config", lambda value: saved.update(value))
+    monkeypatch.setattr(wallet_commands, "_fetch_hosted_wallet_session", lambda session_id: {
+        "address": "0:8cfe5909239848340befe4f4ba94e5fc88eb71c712e576c48546d67496c698e7",
+        "chain": "-239",
+        "public_key": "pub",
+        "proof": {"payload": "notpunks-test"},
+        "device_info": {"appName": "tonkeeper"},
+    })
+    monkeypatch.setattr(wallet_commands, "build_wallet_context", lambda *_args, **_kwargs: None)
+
+    assert wallet_commands._wallet_status(console=Console()) == 0
+
+    assert saved["wallet"]["address"]
+    assert "pending_hosted_session" not in saved["wallet"]
+    assert any("Wallet connected" in message for message in messages)
+
+
 def test_connect_page_posts_restored_wallet_state():
     html = callback_server._CONNECT_HTML
 
