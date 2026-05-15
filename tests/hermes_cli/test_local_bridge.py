@@ -4,6 +4,18 @@ import json
 import threading
 from types import SimpleNamespace
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_local_bridge_security_state():
+    import hermes_cli.local_bridge as local_bridge
+
+    with local_bridge._RATE_LIMIT_LOCK:
+        local_bridge._RATE_LIMITS.clear()
+    with local_bridge._USED_SIGNATURE_LOCK:
+        local_bridge._USED_SIGNATURE_CHALLENGES.clear()
+
 
 def _set_agent_wallet(monkeypatch, wallet="EQwallet"):
     import hermes_cli.local_bridge as local_bridge
